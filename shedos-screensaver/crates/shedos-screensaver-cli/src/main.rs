@@ -1,26 +1,30 @@
 //! `shedos-screensaver` CLI binary.
 //!
-//! Both render backends (TTY + Wayland-native overlay) are wired,
-//! along with optional pipewire audio reactivity and wallpaper
-//! compositing in Wayland mode.
+//! Architecture: an [`Engine`] cycles through (LogoVariant, Effect)
+//! pairs. Each cycle picks a logo + an effect (both random by
+//! default; `--logo=NAME` and/or `--effect=NAME` lock either axis),
+//! renders the logo to a target Frame, runs the effect to completion
+//! against that target, then holds the resolved art for `--hold`
+//! seconds before picking a new pair. This is the Omarchy/tte mental
+//! model — animation forms art into existence.
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::Shell;
 use crossterm::event::{self, Event};
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use shedos_screensaver_audio::{AudioCapture, Source as AudioSrc};
 use shedos_screensaver_core::{Clock, Color, Frame, Logo, RealClock, SignalListener};
+use shedos_screensaver_effects::{target, Effect, EffectCtx, Registry as EffectsRegistry};
 use shedos_screensaver_i18n::{t, t_str, I18n};
-use shedos_screensaver_styles::{Ctx, Registry, Style, StyleOpts};
+use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
 use shedos_screensaver_wayland::{FrameProducer, WaylandConfig, WaylandRenderer};
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -42,78 +46,99 @@ enum AudioSource {
     name = "shedos-screensaver",
     bin_name = "shedos-screensaver",
     version,
-    about = "Animated screensaver with TTY + Wayland backends, 8 styles, audio-reactive",
+    about = "Animated SHEDOS screensaver with TTY + Wayland backends, 8 logo variants × 16 forming effects",
     long_about = None,
 )]
 struct Cli {
+    /// Print a one-line summary and exit (used by `shedman help`).
     #[arg(long)]
     help_summary: bool,
 
-    #[arg(long)]
+    /// List all available effects.
+    #[arg(long, alias = "list-effects")]
     list: bool,
 
-    #[arg(long, value_name = "NAME")]
-    help_style: Option<String>,
+    /// List all available logo variants.
+    #[arg(long)]
+    list_logos: bool,
 
+    /// Print the description of a specific effect.
+    #[arg(long, value_name = "NAME")]
+    help_effect: Option<String>,
+
+    /// Emit a bash completion script and exit.
     #[arg(long)]
     complete_bash: bool,
 
+    /// Emit a zsh completion script and exit.
     #[arg(long)]
     complete_zsh: bool,
 
+    /// Emit a fish completion script and exit.
     #[arg(long)]
     complete_fish: bool,
 
+    /// Lock to a specific effect (otherwise: random each cycle).
     #[arg(long, value_name = "NAME")]
-    style: Option<String>,
+    effect: Option<String>,
 
+    /// Lock to a specific logo variant (otherwise: random each cycle).
+    #[arg(long, value_name = "VARIANT")]
+    logo: Option<String>,
+
+    /// Override the target color (one for the entire session).
     #[arg(long, value_name = "SPEC")]
     color: Option<String>,
 
-    #[arg(long = "style-opt", value_name = "KEY=VAL", action = ArgAction::Append)]
-    style_opts: Vec<String>,
-
+    /// Render backend.
     #[arg(long, value_enum, default_value_t = Mode::Auto)]
     mode: Mode,
 
+    /// Frames per second.
     #[arg(long, value_name = "N")]
     fps: Option<u32>,
 
+    /// Auto-exit after this many seconds.
     #[arg(long, value_name = "SECS")]
     duration: Option<f32>,
 
-    #[arg(long)]
-    random: bool,
+    /// Hold the resolved art for this many seconds between effects.
+    #[arg(long, value_name = "SECS", default_value_t = 3.0)]
+    hold: f32,
 
-    #[arg(long, value_name = "SECS")]
-    shuffle: Option<u32>,
-
+    /// Long-running mode: ignore keypress, exit only on SIGUSR1.
     #[arg(long)]
     idle_daemon: bool,
 
+    /// Audio reactivity source.
     #[arg(long, value_enum, default_value_t = AudioSource::None)]
     audio_source: AudioSource,
 
-    /// Wayland mode background image. `auto` uses
-    /// ~/.config/hypr/wallpaper.png if present; `none` disables.
+    /// Wayland-mode background image (`auto` uses ~/.config/hypr/wallpaper.png).
     #[arg(long, value_name = "PATH|none|auto", default_value = "auto")]
     wallpaper: String,
 
+    /// Wayland-mode wallpaper dim multiplier.
     #[arg(long, value_name = "F", default_value_t = 0.3)]
     wallpaper_dim: f32,
 
+    /// Locale override (BCP-47).
     #[arg(long, value_name = "BCP47")]
     locale: Option<String>,
 
-    /// Wayland-mode font path; defaults to system DejaVu Sans Mono
-    /// (looked up under /usr/share/fonts/TTF/, /usr/share/fonts/dejavu/,
-    /// or /usr/share/fonts/truetype/dejavu/).
+    /// Wayland-mode font path (defaults to system DejaVu Sans Mono).
     #[arg(long, value_name = "PATH")]
     font_path: Option<PathBuf>,
 
-    /// Wayland-mode cell pixel height (cell width derived from font metrics).
+    /// Wayland-mode cell pixel height.
     #[arg(long, value_name = "PX", default_value_t = 18)]
     cell_height_px: u32,
+
+    /// Repeatable: one or more effect names to cycle through (random
+    /// order). Lets you curate a subset like
+    /// `--cycle rain --cycle decrypt --cycle matrix-rain`.
+    #[arg(long = "cycle", value_name = "NAME", action = ArgAction::Append)]
+    cycle: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -140,21 +165,30 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let registry = Registry::new();
+    let effects = EffectsRegistry::new();
 
     if cli.list {
-        print_list(&registry);
+        print_effects_list(&effects);
         return ExitCode::SUCCESS;
     }
-
-    if let Some(style_name) = &cli.help_style {
-        return print_help_style(&registry, style_name);
+    if cli.list_logos {
+        print_logos_list();
+        return ExitCode::SUCCESS;
+    }
+    if let Some(name) = &cli.help_effect {
+        return print_help_effect(&effects, name);
     }
 
     // ----- validations -----
-    if let Some(s) = &cli.style {
-        if registry.get(s).is_none() {
-            eprintln!("error: {}", t_str("error-unknown-style", &[("name", s)]));
+    if let Some(e) = &cli.effect {
+        if effects.get(e).is_none() {
+            eprintln!("error: {}", t_str("error-unknown-effect", &[("name", e)]));
+            return ExitCode::from(2);
+        }
+    }
+    if let Some(l) = &cli.logo {
+        if logos::by_name(l).is_none() {
+            eprintln!("error: {}", t_str("error-unknown-logo", &[("name", l)]));
             return ExitCode::from(2);
         }
     }
@@ -168,41 +202,19 @@ fn main() -> ExitCode {
         },
         None => None,
     };
-
-    // ----- pick the style sequence -----
-    let mut shuffle_keys: Vec<String> = registry.keys().map(str::to_string).collect();
-    let mut rng = ChaCha8Rng::from_entropy();
-    let initial_style: String = if cli.random {
-        shuffle_keys.shuffle(&mut rng);
-        shuffle_keys[0].clone()
-    } else if let Some(s) = &cli.style {
-        s.clone()
-    } else {
-        "logo-bounce".to_string()
-    };
-
-    // ----- shared state across renderer backends -----
-    let signal_listener =
-        SignalListener::install().unwrap_or_else(|e| panic!("signal install: {e}"));
-    let exit_flag = signal_listener.flag();
-
-    let initial_factory = registry.get(&initial_style).expect("validated above");
-    let style: Box<dyn Style> = initial_factory();
-    let schema = style.option_schema();
-    let mut opts = StyleOpts::from_defaults(schema);
-    for kv in &cli.style_opts {
-        if let Err(e) = opts.set(schema, kv) {
-            eprintln!("error: {e}");
+    for name in &cli.cycle {
+        if effects.get(name).is_none() {
+            eprintln!("error: {}", t_str("error-unknown-effect", &[("name", name)]));
             return ExitCode::from(2);
         }
     }
 
-    // Always returns the real SHEDOS art: tries /etc/shedos-ascii.txt first
-    // (so shedos-branding live-updates are picked up), falls back to the
-    // compile-time embedded copy if the file is missing.
-    let logo = Logo::load_default();
+    // Signal handling for graceful exit.
+    let signal_listener =
+        SignalListener::install().unwrap_or_else(|e| panic!("signal install: {e}"));
+    let exit_flag = signal_listener.flag();
 
-    // Audio capture (live, or unconfigured).
+    // Audio capture.
     let audio = match cli.audio_source {
         AudioSource::None => None,
         AudioSource::Desktop => Some(AudioCapture::start(AudioSrc::Desktop)),
@@ -211,38 +223,17 @@ fn main() -> ExitCode {
     if let Some(cap) = &audio {
         if !cap.available() {
             eprintln!(
-                "warning: pipewire not reachable; --audio-source ignored. \
+                "warning: pipewire/ALSA not reachable; --audio-source ignored. \
                  See /usr/share/doc/shedos-screensaver/audio-setup.md."
             );
         }
     }
 
-    // ----- mode dispatch -----
+    // Mode dispatch.
     let resolved_mode = resolve_mode(cli.mode);
     let result = match resolved_mode {
-        Mode::Wayland => run_wayland(
-            &cli,
-            registry,
-            initial_style.clone(),
-            opts,
-            color_override,
-            logo,
-            shuffle_keys,
-            audio,
-            exit_flag.clone(),
-        ),
-        Mode::Tty | Mode::Auto => run_tty(
-            &cli,
-            registry,
-            style,
-            initial_style,
-            opts,
-            color_override,
-            logo,
-            shuffle_keys,
-            audio,
-            exit_flag,
-        ),
+        Mode::Wayland => run_wayland(&cli, color_override, audio, Arc::clone(&exit_flag)),
+        Mode::Tty | Mode::Auto => run_tty(&cli, color_override, audio, Arc::clone(&exit_flag)),
     };
 
     match result {
@@ -267,23 +258,158 @@ fn resolve_mode(m: Mode) -> Mode {
     }
 }
 
+// ============= Engine =============
+
+/// Drives the (logo, effect) cycling. Holds all per-session state
+/// so frame loops in either backend just call `produce(frame)`.
+struct Engine {
+    forced_logo: Option<String>,
+    forced_effect: Option<String>,
+    cycle: Vec<String>,
+    color_override: Option<Color>,
+    rng: ChaCha8Rng,
+    hold: Duration,
+    audio: Option<AudioCapture>,
+    state: EngineState,
+}
+
+enum EngineState {
+    /// First frame — pick the initial pair.
+    Booting,
+    /// Effect is currently animating toward `target`.
+    Animating { effect: Box<dyn Effect>, target: Frame },
+    /// Effect finished; show the resolved art until `holds_remaining` runs out.
+    Holding { target: Frame, holds_remaining: Duration },
+}
+
+impl Engine {
+    fn new(
+        forced_logo: Option<String>,
+        forced_effect: Option<String>,
+        cycle: Vec<String>,
+        color_override: Option<Color>,
+        hold: Duration,
+        audio: Option<AudioCapture>,
+    ) -> Self {
+        Self {
+            forced_logo,
+            forced_effect,
+            cycle,
+            color_override,
+            rng: ChaCha8Rng::from_entropy(),
+            hold,
+            audio,
+            state: EngineState::Booting,
+        }
+    }
+
+    fn pick_logo(&mut self, rows: u16, cols: u16) -> &'static LogoVariant {
+        if let Some(name) = &self.forced_logo {
+            return logos::by_name(name).expect("validated at startup");
+        }
+        logos::pick_random_for_canvas(&mut self.rng, rows, cols)
+    }
+
+    fn pick_effect(&mut self, registry: &EffectsRegistry) -> Box<dyn Effect> {
+        if let Some(name) = &self.forced_effect {
+            return registry.instantiate(name).expect("validated at startup");
+        }
+        if !self.cycle.is_empty() {
+            use rand::seq::SliceRandom;
+            let name = self.cycle.choose(&mut self.rng).expect("non-empty");
+            return registry.instantiate(name).expect("validated at startup");
+        }
+        // Pick uniformly from the full registry.
+        use rand::seq::IteratorRandom;
+        let name = registry.keys().choose(&mut self.rng).expect("non-empty");
+        registry.instantiate(name).expect("registry consistency")
+    }
+
+    fn start_session(&mut self, registry: &EffectsRegistry, rows: u16, cols: u16) {
+        let logo_variant = self.pick_logo(rows, cols);
+        let logo = logo_variant.load();
+        let fg = self.color_override.unwrap_or(logo_variant.default_color);
+        let target = target::build_target(rows, cols, &logo, fg);
+
+        let mut effect = self.pick_effect(registry);
+        let mut ctx = EffectCtx { final_color: fg, rng: &mut self.rng };
+        effect.setup(&target, &mut ctx);
+
+        self.state = EngineState::Animating { effect, target };
+    }
+
+    /// Drive one frame. Frame size determines target dimensions.
+    fn produce(&mut self, frame: &mut Frame, registry: &EffectsRegistry, dt: Duration) {
+        let rows = frame.rows();
+        let cols = frame.cols();
+        let audio_frame = self
+            .audio
+            .as_ref()
+            .filter(|c| c.available())
+            .map(|c| c.latest());
+
+        loop {
+            match &mut self.state {
+                EngineState::Booting => {
+                    self.start_session(registry, rows, cols);
+                }
+                EngineState::Animating { effect, target } => {
+                    // If frame size has changed, restart the session
+                    // with new target dimensions.
+                    if target.rows() != rows || target.cols() != cols {
+                        self.start_session(registry, rows, cols);
+                        continue;
+                    }
+                    frame.clear();
+                    let done = effect.step(frame, dt, audio_frame.as_ref());
+                    if done {
+                        // Snap canvas to exact target so the held image
+                        // looks pristine regardless of effect finish-state.
+                        frame.clone_from(target);
+                        self.state = EngineState::Holding {
+                            target: target.clone(),
+                            holds_remaining: self.hold,
+                        };
+                    }
+                    return;
+                }
+                EngineState::Holding { target, holds_remaining } => {
+                    if target.rows() != rows || target.cols() != cols {
+                        self.start_session(registry, rows, cols);
+                        continue;
+                    }
+                    frame.clone_from(target);
+                    if dt >= *holds_remaining {
+                        self.start_session(registry, rows, cols);
+                    } else {
+                        *holds_remaining -= dt;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+}
+
 // ============= TTY mode =============
 
 fn run_tty(
     cli: &Cli,
-    registry: Registry,
-    mut style: Box<dyn Style>,
-    initial_style: String,
-    mut opts: StyleOpts,
     color_override: Option<Color>,
-    logo: Logo,
-    mut shuffle_keys: Vec<String>,
     audio: Option<AudioCapture>,
     exit_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
     let (rows, cols) = detect_terminal_size();
     let fps = cli.fps.unwrap_or(30).max(1);
-    let mut rng = ChaCha8Rng::from_entropy();
+    let mut engine = Engine::new(
+        cli.logo.clone(),
+        cli.effect.clone(),
+        cli.cycle.clone(),
+        color_override,
+        Duration::from_secs_f32(cli.hold.max(0.0)),
+        audio,
+    );
+    let registry = EffectsRegistry::new();
 
     let _guard: Option<TerminalGuard> = if stdout_is_tty() {
         match TerminalGuard::enter() {
@@ -304,8 +430,6 @@ fn run_tty(
     let mut frame = Frame::new(rows, cols);
     let start = clock.elapsed();
     let mut last = start;
-    let mut style_started = start;
-    let _ = initial_style;
 
     loop {
         if exit_flag.load(Ordering::Acquire) {
@@ -316,22 +440,9 @@ fn run_tty(
                 break;
             }
         }
-        if let Some(s) = cli.shuffle {
-            if (clock.elapsed() - style_started).as_secs() >= s as u64 {
-                shuffle_keys.shuffle(&mut rng);
-                let next = shuffle_keys[0].clone();
-                if let Some(factory) = registry.get(&next) {
-                    style = factory();
-                    let new_schema = style.option_schema();
-                    opts = StyleOpts::from_defaults(new_schema);
-                    style_started = clock.elapsed();
-                    renderer.invalidate();
-                }
-            }
-        }
 
-        // Keypress / resize exit (idle-daemon ignores keypress).
-        if !cli.idle_daemon && stdout_is_tty()
+        if !cli.idle_daemon
+            && stdout_is_tty()
             && event::poll(Duration::from_millis(0)).unwrap_or(false)
         {
             if let Ok(ev) = event::read() {
@@ -349,23 +460,9 @@ fn run_tty(
         let now = clock.elapsed();
         let dt = now - last;
         last = now;
-        frame.clear();
 
-        let color = color_override.unwrap_or_else(|| style.default_color());
-        let audio_frame = audio.as_ref().filter(|c| c.available()).map(|c| c.latest());
-        let mut ctx = Ctx {
-            t: now - style_started,
-            dt,
-            color,
-            logo: &logo,
-            opts: &opts,
-            rng: &mut rng,
-            audio: audio_frame.as_ref(),
-        };
-        style.draw(&mut frame, &mut ctx);
-        renderer
-            .submit(&frame)
-            .map_err(|e| format!("tty submit: {e}"))?;
+        engine.produce(&mut frame, &registry, dt);
+        renderer.submit(&frame).map_err(|e| format!("tty submit: {e}"))?;
 
         let next_frame_at = now + frame_budget;
         let after_render = clock.elapsed();
@@ -379,16 +476,9 @@ fn run_tty(
 
 // ============= Wayland mode =============
 
-/// Drives the Wayland renderer by handing it a producer that pulls
-/// from the same registry/style/options pipeline as TTY mode.
 fn run_wayland(
     cli: &Cli,
-    registry: Registry,
-    initial_style: String,
-    opts: StyleOpts,
     color_override: Option<Color>,
-    logo: Logo,
-    shuffle_keys: Vec<String>,
     audio: Option<AudioCapture>,
     exit_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
@@ -402,28 +492,24 @@ fn run_wayland(
         idle_daemon: cli.idle_daemon,
     };
 
-    // Producer state shared across frame callbacks.
-    let producer = StyleProducer {
-        registry,
-        current_key: initial_style.clone(),
-        current: registry_get_or_default(&initial_style),
-        opts: Arc::new(Mutex::new(opts)),
-        color_override,
-        logo,
-        shuffle_keys,
-        shuffle_secs: cli.shuffle,
-        rng: ChaCha8Rng::from_entropy(),
-        audio,
+    let producer = EngineProducer {
+        engine: Engine::new(
+            cli.logo.clone(),
+            cli.effect.clone(),
+            cli.cycle.clone(),
+            color_override,
+            Duration::from_secs_f32(cli.hold.max(0.0)),
+            audio,
+        ),
+        registry: EffectsRegistry::new(),
         clock: RealClock::new(),
-        style_started: Duration::ZERO,
         last_frame: Duration::ZERO,
-        duration: cli.duration,
-        start: Duration::ZERO,
         first: true,
         exit_flag: Arc::clone(&exit_flag),
+        duration: cli.duration,
+        start: Duration::ZERO,
     };
 
-    // Start a watchdog thread that flips exit_flag when --duration expires.
     if let Some(d) = cli.duration {
         let f = Arc::clone(&exit_flag);
         std::thread::spawn(move || {
@@ -435,20 +521,12 @@ fn run_wayland(
     WaylandRenderer::run(cfg, Box::new(producer), exit_flag).map_err(|e| format!("wayland: {e}"))
 }
 
-fn registry_get_or_default(key: &str) -> Box<dyn Style> {
-    Registry::new()
-        .instantiate(key)
-        .unwrap_or_else(|| Registry::new().instantiate("logo-bounce").expect("logo-bounce always present"))
-}
-
 fn resolve_wallpaper(arg: &str) -> Option<PathBuf> {
     match arg {
         "none" => None,
         "auto" => {
-            // ~/.config/hypr/wallpaper.png if present.
             if let Some(home) = std::env::var_os("HOME") {
-                let p = PathBuf::from(home)
-                    .join(".config/hypr/wallpaper.png");
+                let p = PathBuf::from(home).join(".config/hypr/wallpaper.png");
                 if p.exists() {
                     return Some(p);
                 }
@@ -459,32 +537,22 @@ fn resolve_wallpaper(arg: &str) -> Option<PathBuf> {
     }
 }
 
-struct StyleProducer {
-    registry: Registry,
-    current_key: String,
-    current: Box<dyn Style>,
-    opts: Arc<Mutex<StyleOpts>>,
-    color_override: Option<Color>,
-    logo: Logo,
-    shuffle_keys: Vec<String>,
-    shuffle_secs: Option<u32>,
-    rng: ChaCha8Rng,
-    audio: Option<AudioCapture>,
+struct EngineProducer {
+    engine: Engine,
+    registry: EffectsRegistry,
     clock: RealClock,
-    style_started: Duration,
     last_frame: Duration,
-    duration: Option<f32>,
-    start: Duration,
     first: bool,
     exit_flag: Arc<std::sync::atomic::AtomicBool>,
+    duration: Option<f32>,
+    start: Duration,
 }
 
-impl FrameProducer for StyleProducer {
+impl FrameProducer for EngineProducer {
     fn produce(&mut self, frame: &mut Frame) {
         let now = self.clock.elapsed();
         if self.first {
             self.start = now;
-            self.style_started = now;
             self.last_frame = now;
             self.first = false;
         }
@@ -493,103 +561,66 @@ impl FrameProducer for StyleProducer {
                 self.exit_flag.store(true, Ordering::Release);
             }
         }
-        if let Some(s) = self.shuffle_secs {
-            if (now - self.style_started).as_secs() >= s as u64 {
-                self.shuffle_keys.shuffle(&mut self.rng);
-                let next = self.shuffle_keys[0].clone();
-                if let Some(f) = self.registry.get(&next) {
-                    self.current = f();
-                    self.current_key = next;
-                    let new_schema = self.current.option_schema();
-                    if let Ok(mut o) = self.opts.lock() {
-                        *o = StyleOpts::from_defaults(new_schema);
-                    }
-                    self.style_started = now;
-                }
-            }
-        }
         let dt = now - self.last_frame;
         self.last_frame = now;
-        let color = self.color_override.unwrap_or_else(|| self.current.default_color());
-        let audio_frame = self.audio.as_ref().filter(|c| c.available()).map(|c| c.latest());
-        let opts = self.opts.lock().expect("opts lock");
-        let mut ctx = Ctx {
-            t: now - self.style_started,
-            dt,
-            color,
-            logo: &self.logo,
-            opts: &opts,
-            rng: &mut self.rng,
-            audio: audio_frame.as_ref(),
-        };
-        self.current.draw(frame, &mut ctx);
+        self.engine.produce(frame, &self.registry, dt);
     }
 }
 
 // ============= read-only print helpers =============
 
-fn print_list(registry: &Registry) {
-    println!("{}", t("list-header"));
+fn print_effects_list(registry: &EffectsRegistry) {
+    println!("{}", t("list-effects-header"));
     for key in registry.keys() {
-        let title_key = format!("style-{key}-title");
-        let title = t(&title_key);
-        let color_label = default_color_label(key);
+        let effect = registry.instantiate(key).expect("registry consistency");
+        let dur_ms = effect.duration().as_millis();
         println!(
             "  {}",
             t_str(
-                "list-style-line",
-                &[("key", key), ("title", title.as_str()), ("color", color_label)],
-            )
-        );
-    }
-}
-
-fn default_color_label(key: &str) -> &'static str {
-    match key {
-        "logo-bounce" | "tunnel" => "blue",
-        "matrix" => "green",
-        "plasma" | "waves" => "mauve",
-        "starfield" => "text",
-        "conway" | "mandala" => "peach",
-        _ => "text",
-    }
-}
-
-fn print_help_style(registry: &Registry, name: &str) -> ExitCode {
-    let factory = match registry.get(name) {
-        Some(f) => f,
-        None => {
-            eprintln!("error: {}", t_str("error-unknown-style", &[("name", name)]));
-            return ExitCode::from(2);
-        }
-    };
-    let style = factory();
-    let schema = style.option_schema();
-    println!("{}", t_str("help-style-header", &[("name", name)]));
-    if schema.options.is_empty() {
-        println!("  {}", t("help-style-no-options"));
-        return ExitCode::SUCCESS;
-    }
-    for opt in schema.options {
-        let default = match &opt.default {
-            shedos_screensaver_styles::OptVal::Bool(b) => b.to_string(),
-            shedos_screensaver_styles::OptVal::UInt(u) => u.to_string(),
-            shedos_screensaver_styles::OptVal::Float(f) => format!("{f}"),
-            shedos_screensaver_styles::OptVal::String(s) => s.clone(),
-        };
-        println!(
-            "  {}",
-            t_str(
-                "help-style-line",
+                "list-effect-line",
                 &[
-                    ("key", opt.key),
-                    ("ty", opt.ty.label()),
-                    ("default", default.as_str()),
-                    ("desc", opt.desc),
+                    ("key", key),
+                    ("title", effect.title()),
+                    ("description", effect.description()),
+                    ("duration_ms", &dur_ms.to_string()),
                 ],
             )
         );
     }
+}
+
+fn print_logos_list() {
+    println!("{}", t("list-logos-header"));
+    for v in logos::LIBRARY {
+        println!(
+            "  {}",
+            t_str(
+                "list-logo-line",
+                &[
+                    ("key", v.name),
+                    ("title", v.title),
+                    ("description", v.description),
+                ],
+            )
+        );
+    }
+}
+
+fn print_help_effect(registry: &EffectsRegistry, name: &str) -> ExitCode {
+    let factory = match registry.get(name) {
+        Some(f) => f,
+        None => {
+            eprintln!("error: {}", t_str("error-unknown-effect", &[("name", name)]));
+            return ExitCode::from(2);
+        }
+    };
+    let effect = factory();
+    let dur_ms = effect.duration().as_millis();
+    println!("{}", t_str("help-effect-header", &[("name", name)]));
+    println!("  Title: {}", effect.title());
+    println!("  Description: {}", effect.description());
+    println!("  Duration: {} ms", dur_ms);
+    println!("  Audio-reactive: {}", if effect.reactive() { "yes" } else { "no" });
     ExitCode::SUCCESS
 }
 
@@ -605,27 +636,24 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn registry_count_matches_plan() {
-        assert_eq!(Registry::new().len(), 8);
-    }
-
-    #[test]
     fn cli_parses_all_documented_flags() {
         let _ = Cli::try_parse_from([
             "shedos-screensaver",
-            "--style", "matrix",
+            "--effect", "rain",
+            "--logo", "block",
             "--color", "#89b4fa",
-            "--style-opt", "density=0.7",
             "--mode", "tty",
             "--fps", "30",
-            "--duration", "0.5",
+            "--duration", "5",
+            "--hold", "2",
             "--audio-source", "desktop",
             "--wallpaper", "auto",
             "--wallpaper-dim", "0.3",
             "--locale", "en-US",
-            "--shuffle", "60",
-            "--font-path", "/tmp/fake.ttf",
+            "--font-path", "/tmp/x.ttf",
             "--cell-height-px", "20",
+            "--cycle", "rain",
+            "--cycle", "decrypt",
         ])
         .unwrap();
     }
@@ -636,19 +664,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_wallpaper_none_returns_none() {
+    fn resolve_wallpaper_handles_modes() {
         assert_eq!(resolve_wallpaper("none"), None);
+        assert_eq!(resolve_wallpaper("/tmp/wp.png"), Some(PathBuf::from("/tmp/wp.png")));
     }
 
     #[test]
-    fn resolve_wallpaper_explicit_path_passes_through() {
-        let p = resolve_wallpaper("/tmp/wp.png");
-        assert_eq!(p, Some(PathBuf::from("/tmp/wp.png")));
+    fn registry_count() {
+        assert!(EffectsRegistry::new().len() >= 12);
     }
 
     #[test]
-    fn resolve_mode_explicit_returns_as_is() {
-        assert_eq!(resolve_mode(Mode::Tty), Mode::Tty);
-        assert_eq!(resolve_mode(Mode::Wayland), Mode::Wayland);
+    fn logos_count() {
+        assert!(logos::LIBRARY.len() >= 8);
     }
+}
+
+// Force-keep Logo import used by the Engine via target::build_target.
+#[allow(dead_code)]
+fn _force_logo_use() -> Logo {
+    Logo::embedded()
 }

@@ -2,7 +2,7 @@ shedman-screensaver(1)
 
 # NAME
 
-shedman-screensaver - animated ShedOS screensaver (TTY + Wayland)
+shedman-screensaver - animated SHEDOS screensaver (TTY + Wayland)
 
 # SYNOPSIS
 
@@ -11,25 +11,33 @@ shedman-screensaver - animated ShedOS screensaver (TTY + Wayland)
 
 # DESCRIPTION
 
-Runs an animated screensaver as either a terminal-based animation
-(default when invoked from a TTY) or a Wayland-native fullscreen
-overlay (used by hypridle on idle).
+Animates SHEDOS ASCII art into existence using one of 16 forming
+effects (rain, decrypt, scattered, glitch, hologram, …). Each cycle
+picks a logo variant + an effect, animates the variant in, holds
+the resolved art for *--hold* seconds, then picks a new pair and
+loops. The Omarchy / TerminalTextEffects mental model: *the
+animation is how the art appears*.
 
 The same binary backs both surfaces — pass *--mode=tty* or
-*--mode=wayland* to force one. The default *--mode=auto* picks
-Wayland when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
+*--mode=wayland* to force one. Default *--mode=auto* picks Wayland
+when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
-Eight visual styles are bundled (see *STYLES* below). Each style
-honors a *--color* override and a per-style typed *--style-opt*
-override; the per-style schema is printed by *--help-style*.
+Eight SHEDOS art variants ship in the catalog (block, ansi-shadow,
+slant, big, small, doom, outline, mini). Sixteen effects ship in
+the registry. With both axes random, that's 128 visually distinct
+sessions.
 
 # READ-ONLY OPTIONS
 
-*--list*
-	List all available styles with their default colors and exit.
+*--list*, *--list-effects*
+	List all available effects with title + duration + description.
 
-*--help-style* _NAME_
-	Print the option schema for one style and exit.
+*--list-logos*
+	List all available SHEDOS logo variants.
+
+*--help-effect* _NAME_
+	Print the description of one effect (title, description,
+	duration, audio-reactivity).
 
 *--help*, *-h*
 	Print full help and exit.
@@ -43,29 +51,32 @@ override; the per-style schema is printed by *--help-style*.
 *--complete-bash*, *--complete-zsh*, *--complete-fish*
 	Emit the corresponding shell-completion script and exit.
 
-# RENDER OPTIONS
+# RUNTIME OPTIONS
 
 *--mode* _tty_|_wayland_|_auto_
 	Render backend. Default: *auto*.
 
-*--style* _NAME_
-	One of: *logo-bounce*, *matrix*, *plasma*, *starfield*,
-	*conway*, *tunnel*, *waves*, *mandala*. Required unless
-	*--random* is set or [defaults].style is set in
-	/etc/shedos/screensaver.toml.
+*--effect* _NAME_
+	Lock to one effect (otherwise: random each cycle). One of
+	the names from *--list-effects*.
+
+*--logo* _VARIANT_
+	Lock to one logo variant (otherwise: random each cycle).
+	One of the names from *--list-logos*.
+
+*--cycle* _NAME_
+	Repeatable: build a custom rotation. Example:
+	*--cycle rain --cycle decrypt --cycle matrix-rain* picks
+	uniformly across only those three effects each cycle.
 
 *--color* _SPEC_
-	Override the style's default color. Accepts:
+	Override the target color (one for the entire session).
+	Accepts:
 	- Hex: *#89b4fa*, *89b4fa*
 	- RGB: *137,180,250*
 	- Named ANSI: *red green blue cyan magenta yellow white black*
 	- Catppuccin Mocha: *blue mauve peach text rosewater flamingo
-	  pink red maroon yellow green teal sky sapphire lavender*
-	  (and the surface/overlay/base/mantle/crust variants)
-
-*--style-opt* _KEY=VAL_
-	Per-style typed override. Repeatable. See *--help-style* for
-	the per-style schema.
+	  pink red maroon yellow green teal sky sapphire lavender* …
 
 *--fps* _N_
 	Frames per second; default 30 (TTY) / 60 (Wayland).
@@ -73,80 +84,112 @@ override; the per-style schema is printed by *--help-style*.
 *--duration* _SECS_
 	Auto-exit after this many seconds. Used by tests.
 
-*--random*
-	Pick a random style at start.
-
-*--shuffle* _SECS_
-	Rotate styles every N seconds.
+*--hold* _SECS_
+	Hold the resolved art for this many seconds between effects.
+	Default: 3.
 
 *--idle-daemon*
-	Long-running mode: ignores keyboard, exits only on SIGUSR1.
-	Used by the hypridle integration so on-resume can deterministically
-	end the screensaver.
+	Long-running mode for hypridle: ignores keyboard, exits only
+	on SIGUSR1.
 
 *--audio-source* _desktop_|_mic_|_none_
-	Audio reactivity source. Default: *none*.
+	Audio reactivity source. Default: *none*. See
+	/usr/share/doc/shedos-screensaver/audio-setup.md.
 
 *--wallpaper* _PATH_|_none_|_auto_
-	Wayland-only background layer. *auto* uses
-	~/.config/hypr/wallpaper.png if present.
+	Wayland-only background layer.
 
 *--wallpaper-dim* _F_
-	Backdrop dimming multiplier (0.0..=1.0). Default: 0.3.
+	Backdrop dimming multiplier (0..=1). Default: 0.3.
+
+*--font-path* _PATH_
+	Wayland-only font (defaults to system DejaVu Sans Mono).
+
+*--cell-height-px* _PX_
+	Wayland-only cell pixel height. Default: 18.
 
 *--locale* _BCP47_
-	Override system locale. Default: resolved from
-	$LC_ALL → $LC_MESSAGES → $LANG → en-US.
+	Override system locale.
 
-# STYLES
+# EFFECTS
 
-*logo-bounce*
-	DVD-screensaver bounce of the SHEDOS logo. Color cycles on
-	wall hits.
+The 16 ship effects. Run *shedos-screensaver --list* for the live
+catalog with durations.
 
-*matrix*
-	Falling glyph trails in the green Matrix tradition. Density,
-	trail length, and glyph set tunable.
+*rain*
+	Characters fall from above into target positions, staggered.
 
-*plasma*
-	Sin/cos blended plasma field. Optionally audio-reactive via
-	bass/mid/treble bands.
+*decrypt*
+	Movie-style decryption: ciphertext flickers in every cell,
+	resolves cell by cell.
 
-*starfield*
-	3D-perspective stars streaming outward from center. SHEDOS
-	logo pulses at the vanishing point.
+*print*
+	Typewriter reveal with blinking cursor.
 
-*conway*
-	Conway's Game of Life seeded from the SHEDOS silhouette.
-	Reseeds every 30 s by default.
+*scattered*
+	Cells start scattered across the canvas and fly to position
+	with eased motion.
 
-*tunnel*
-	Concentric rings of glyphs zoom toward the viewer; SHEDOS
-	logo at the far end.
+*wipe*
+	Diagonal sweep front; cells reveal in its wake.
 
-*waves*
-	Two interfering sine waves sweep glyphs across the canvas.
-	Phase shifts over time.
+*slide*
+	Even rows slide in from the left, odd rows from the right.
 
-*mandala*
-	8-fold rotational symmetric kaleidoscope using SHEDOS glyphs
-	as the kernel.
+*expand*
+	Cells emerge from the canvas center and fly outward.
+
+*crumble*
+	Gravity-driven fall with sinusoidal horizontal drift.
+
+*spotlights*
+	Three orbiting spotlights illuminate cells progressively.
+
+*burn*
+	Flame front rises from the bottom; cells appear glowing
+	through ember to the final color.
+
+*colorshift*
+	Target shown immediately; cells cycle through Catppuccin
+	palette before settling.
+
+*glitch*
+	Datamosh corruption: rows scroll/garble, then heal.
+	Audio-reactive: beats spike destabilization.
+
+*quantum*
+	Wavefunction collapse: superposed glyphs flicker, then each
+	cell collapses to its definite target.
+
+*synthgrid*
+	Synthwave perspective grid forms, then dissolves into the
+	target.
+
+*matrix-rain*
+	Green katakana rain falls; trails freeze into target cells.
+
+*hologram*
+	CRT scanlines sweep cyan; cells solidify in the wake.
+
+# LOGO VARIANTS
+
+Eight SHEDOS art variants. Run *shedos-screensaver --list-logos*
+for descriptions.
+
+*block*, *ansi-shadow*, *slant*, *big*, *small*, *doom*, *outline*, *mini*
 
 # CONFIGURATION
 
 /etc/shedos/screensaver.toml
 	System-wide defaults. Backed up by pacman; user edits survive
-	package upgrades. The [defaults] section sets *style*, *color*,
-	*fps*, *mode*, *audio_source*, *wallpaper*, *wallpaper_dim*, and
-	*locale*. Per-style sections [style.<name>] override the
-	style's option defaults.
+	package upgrades.
 
 # HYPRIDLE INTEGRATION
 
 On fresh installs, /etc/skel/.config/hypr/hypridle.conf includes
 a listener that fires *shedos-screensaver --mode=wayland
---idle-daemon --shuffle 60* 60 s before the lock timeout, with an
-*on-resume* hook that sends SIGUSR1 to tear it down.
+--idle-daemon* 60 s before lock, with an *on-resume* hook that
+sends SIGUSR1.
 
 For users on existing accounts (where /etc/skel doesn't apply),
 copy the snippet from
@@ -155,12 +198,8 @@ copy the snippet from
 
 # EXIT STATUS
 
-*0*
-	Success.
-
-*2*
-	Invalid arguments (unknown style, malformed color, malformed
-	style-opt, etc.).
+*0* — success.++
+*2* — invalid arguments (unknown effect/logo/color, malformed flag).
 
 # FILES
 
@@ -168,11 +207,13 @@ copy the snippet from
 	Defaults; backed up by pacman.
 
 /etc/shedos-ascii.txt
-	The canonical SHEDOS ASCII art consumed by the *logo-bounce*,
-	*conway*, *starfield*, *tunnel*, and *mandala* styles.
+	Per-system override of the canonical SHEDOS art (the *block*
+	variant). Optional — the binary embeds all 8 variants at
+	compile time, so this file is purely an override channel.
 
 /usr/share/doc/shedos-screensaver/
-	Bundled docs: hypridle-example.conf, styles.md, audio-setup.md.
+	Bundled docs: hypridle-example.conf, effects.md, logos.md,
+	audio-setup.md.
 
 # SEE ALSO
 

@@ -91,8 +91,10 @@ package() {
     install -d "$pkgdir/usr/share/doc/shedos-screensaver"
     install -m644 tree/usr/share/doc/shedos-screensaver/hypridle-example.conf \
         "$pkgdir/usr/share/doc/shedos-screensaver/hypridle-example.conf"
-    install -m644 tree/usr/share/doc/shedos-screensaver/styles.md \
-        "$pkgdir/usr/share/doc/shedos-screensaver/styles.md"
+    install -m644 tree/usr/share/doc/shedos-screensaver/effects.md \
+        "$pkgdir/usr/share/doc/shedos-screensaver/effects.md"
+    install -m644 tree/usr/share/doc/shedos-screensaver/logos.md \
+        "$pkgdir/usr/share/doc/shedos-screensaver/logos.md"
     install -m644 tree/usr/share/doc/shedos-screensaver/audio-setup.md \
         "$pkgdir/usr/share/doc/shedos-screensaver/audio-setup.md"
 

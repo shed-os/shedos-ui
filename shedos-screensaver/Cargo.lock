@@ -1452,8 +1452,9 @@ dependencies = [
  "rand_chacha",
  "shedos-screensaver-audio",
  "shedos-screensaver-core",
+ "shedos-screensaver-effects",
  "shedos-screensaver-i18n",
- "shedos-screensaver-styles",
+ "shedos-screensaver-logos",
  "shedos-screensaver-tty",
  "shedos-screensaver-wayland",
 ]
@@ -1491,17 +1492,6 @@ dependencies = [
  "rand",
  "rand_chacha",
  "shedos-screensaver-core",
-]
-
-[[package]]
-name = "shedos-screensaver-styles"
-version = "0.1.0"
-dependencies = [
- "insta",
- "rand",
- "rand_chacha",
- "shedos-screensaver-core",
- "shedos-screensaver-tty",
 ]
 
 [[package]]

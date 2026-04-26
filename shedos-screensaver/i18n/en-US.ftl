@@ -4,32 +4,23 @@
 ## any other locale, since this is the embedded fallback.
 
 app-name = ShedOS animated screensaver
-help-summary = Run an animated ShedOS screensaver in this terminal or as a Wayland overlay
+help-summary = Form animated SHEDOS art with random effects: terminal-based or Wayland fullscreen overlay
 
-# --list output
-list-header = Available styles:
-list-style-line = { $key } — { $title } (default color: { $color })
+# --list / --list-effects output
+list-effects-header = Available effects:
+list-effect-line = { $key } — { $title } ({ $duration_ms } ms): { $description }
 
-# --help-style output
-help-style-header = Options for style "{ $name }":
-help-style-line = { $key } ({ $ty }, default { $default }) — { $desc }
-help-style-no-options = (no options)
+# --list-logos output
+list-logos-header = Available logo variants:
+list-logo-line = { $key } — { $title }: { $description }
 
-# Style titles (mirrored in shedos-screensaver-styles when registry is wired)
-style-logo-bounce-title = Bouncing SHEDOS
-style-matrix-title = Matrix Rain
-style-plasma-title = Plasma Field
-style-starfield-title = Warp Stars
-style-conway-title = Conway's SHEDOS
-style-tunnel-title = Tunnel
-style-waves-title = Wave Lattice
-style-mandala-title = SHEDOS Mandala
+# --help-effect output
+help-effect-header = Effect "{ $name }":
 
 # Errors
-error-unknown-style = unknown style "{ $name }". Run `shedos-screensaver --list` to see all styles.
+error-unknown-effect = unknown effect "{ $name }". Run `shedos-screensaver --list-effects` to see all effects.
+error-unknown-logo = unknown logo variant "{ $name }". Run `shedos-screensaver --list-logos` to see all variants.
 error-invalid-color = invalid color "{ $spec }"; expected #rrggbb, r,g,b, named ANSI, or Catppuccin shorthand.
-error-invalid-style-opt = invalid --style-opt "{ $arg }"; expected KEY=VAL.
-error-style-opt-out-of-range = option "{ $key }" for style "{ $style }" must be { $range }; got { $given }.
-error-no-default-style = no style selected; pass --style or set [defaults].style in /etc/shedos/screensaver.toml.
+error-no-default-effect = no effect selected; pass --effect or accept the default (random each cycle).
 error-wayland-unavailable = Wayland mode requested but $WAYLAND_DISPLAY is not set; falling back to TTY.
 error-audio-unavailable = audio source "{ $source }" requested but pipewire is not reachable; running without audio reactivity.
