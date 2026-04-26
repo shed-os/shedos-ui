@@ -86,7 +86,9 @@ sessions.
 
 *--hold* _SECS_
 	Hold the resolved art for this many seconds between effects.
-	Default: 3.
+	Default: 3. Pass *--hold 0* for one-shot mode: animate the art
+	in once and sit on the resolved frame until *--duration* /
+	SIGINT / SIGUSR1 / a keypress.
 
 *--idle-daemon*
 	Long-running mode for hypridle: ignores keyboard, exits only
@@ -113,7 +115,7 @@ sessions.
 
 # EFFECTS
 
-The 16 ship effects. Run *shedos-screensaver --list* for the live
+The 26 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -170,6 +172,46 @@ catalog with durations.
 
 *hologram*
 	CRT scanlines sweep cyan; cells solidify in the wake.
+
+*neon-trace*
+	Cells light up neon-pink/cyan one by one along a diagonal sweep,
+	then fade to the target color. CRT vector-display feel.
+
+*blackhole*
+	Cells spiral into the canvas center under gravity, vanish, then
+	explode outward to their target positions. Dramatic rebirth.
+
+*shockwave*
+	A radial pulse expands from the canvas center; cells reveal as
+	the wavefront passes them, with a bright leading edge.
+
+*liquid-fill*
+	Cells fill from the bottom up like rising water; surface oscillates
+	with foam at the meniscus.
+
+*constellation*
+	Cells appear as dots, brighten into stars, then morph into
+	letterforms — the SHEDOS art drawn as a star map.
+
+*interlace*
+	CRT interlace reveal: even rows sweep left-to-right first, then
+	odd rows fill in. Cyan leading edge.
+
+*thermal*
+	Cells heat up through a thermal colormap (blue → cyan → yellow
+	→ red → white) and settle to the final color. No motion — pure color.
+
+*data-stream*
+	Streams of 1s and 0s flow across each row; cells lock to the
+	target glyph as the stream passes them.
+
+*tetris*
+	Each lit cell is a falling block; blocks per column land
+	bottom-up and lock at their target rows.
+
+*boot-sequence*
+	Fake terminal boot log scrolls up; the final line is `Initializing
+	SHEDOS…` and the art emerges from below.
 
 # LOGO VARIANTS
 
