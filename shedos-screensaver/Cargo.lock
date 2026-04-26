@@ -1466,12 +1466,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "shedos-screensaver-effects"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "rand",
+ "rand_chacha",
+ "shedos-screensaver-core",
+]
+
+[[package]]
 name = "shedos-screensaver-i18n"
 version = "0.1.0"
 dependencies = [
  "fluent",
  "fluent-bundle",
  "unic-langid",
+]
+
+[[package]]
+name = "shedos-screensaver-logos"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "rand_chacha",
+ "shedos-screensaver-core",
 ]
 
 [[package]]

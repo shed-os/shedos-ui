@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/shedos-screensaver-core",
     "crates/shedos-screensaver-i18n",
+    "crates/shedos-screensaver-logos",
+    "crates/shedos-screensaver-effects",
     "crates/shedos-screensaver-styles",
     "crates/shedos-screensaver-tty",
     "crates/shedos-screensaver-wayland",
@@ -44,6 +46,8 @@ libc = "0.2"
 
 shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
 shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
+shedos-screensaver-logos = { path = "crates/shedos-screensaver-logos" }
+shedos-screensaver-effects = { path = "crates/shedos-screensaver-effects" }
 shedos-screensaver-styles = { path = "crates/shedos-screensaver-styles" }
 shedos-screensaver-tty = { path = "crates/shedos-screensaver-tty" }
 shedos-screensaver-wayland = { path = "crates/shedos-screensaver-wayland" }
