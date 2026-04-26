@@ -106,9 +106,17 @@ impl Effect for Burn {
             }
             // Reveal time was when front passed c.row; for cells just
             // revealed, blend toward ember orange; deeper into the
-            // burn they fade to c.color.
+            // burn they fade to c.color. In the last 5 % force the
+            // settle to 1.0 so the resolved SHEDOS is solid target
+            // color across all rows (no leftover orange tint on the
+            // top rows that the ember-distance window never quite
+            // reached).
             let cells_since_reveal = c.row as f32 - front;
-            let settle = (cells_since_reveal / 6.0).clamp(0.0, 1.0);
+            let settle = if progress >= 0.95 {
+                1.0
+            } else {
+                (cells_since_reveal / 6.0).clamp(0.0, 1.0)
+            };
             let r_ch = lerp_u8(0xfa, c.color.r, settle);
             let g_ch = lerp_u8(0x68, c.color.g, settle);
             let b_ch = lerp_u8(0x10, c.color.b, settle);

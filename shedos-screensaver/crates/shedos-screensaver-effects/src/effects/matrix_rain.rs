@@ -118,13 +118,20 @@ impl Effect for MatrixRain {
 
         frame.clear();
 
-        // Step trails.
+        // Step trails. In the last 5 % suppress the rain entirely so
+        // the resolved SHEDOS sits solid with no katakana residue
+        // around the letters.
+        let suppress_rain = progress >= 0.95;
         for col in 0..self.cols as usize {
+            if suppress_rain {
+                self.trails_per_col[col] = None;
+                continue;
+            }
             if let Some(trail) = self.trails_per_col[col].as_mut() {
                 trail.head += trail.speed * dt_s;
                 let head_r = trail.head as i32;
                 if head_r - trail.length > self.rows as i32 {
-                    // Respawn (or stop if we're past 70% — let frozen cells dominate).
+                    // Respawn (or stop if we're past 85 % — let frozen cells dominate).
                     if progress < 0.85 {
                         trail.head = -(frame_rng.gen_range(0..self.rows as i32) as f32) * 0.5;
                         trail.speed = frame_rng.gen_range(8.0..22.0);

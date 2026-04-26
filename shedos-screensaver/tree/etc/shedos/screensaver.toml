@@ -27,6 +27,8 @@ color = ""
 fps = 30
 
 # Hold the resolved art this many seconds between effects.
+# 0 = one-shot mode: animate once, sit on the resolved frame until
+# --duration / signal / keypress (good for testing single effects).
 hold = 3.0
 
 # Render backend. "auto" picks tty when invoked from an interactive

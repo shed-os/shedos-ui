@@ -66,8 +66,12 @@ impl Effect for Synthgrid {
 
         frame.clear();
         // Phase 1 (0..0.6): build the grid.
+        // Phase 3 (≥ 0.95): suppress the grid entirely so the
+        // resolved SHEDOS art is solid with no leftover rays /
+        // scan lines around the letters.
         let grid_progress = (progress / 0.6).min(1.0);
-        if grid_progress > 0.0 {
+        let suppress_grid = progress >= 0.95;
+        if grid_progress > 0.0 && !suppress_grid {
             // Vertical "perspective" lines: 8 vanishing-point rays.
             for line_i in 0..8 {
                 let line_x_at_horizon = cols_f * 0.5;

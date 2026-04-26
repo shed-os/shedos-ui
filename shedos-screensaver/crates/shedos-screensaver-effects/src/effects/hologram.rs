@@ -91,7 +91,14 @@ impl Effect for Hologram {
 
         frame.clear();
 
-        // Scanline stripes (full-width cyan bars).
+        // Scanline stripes (full-width cyan bars). Suppressed in the
+        // last 5 % so the resolved SHEDOS doesn't have leftover stripes
+        // bisecting it.
+        let suppress_scan = progress >= 0.95;
+        if suppress_scan {
+            // Skip scanline rendering entirely; only target cells
+            // (rendered below) end up on the canvas.
+        } else {
         for &scan_y in &scan_positions {
             let r_int = scan_y.round() as i32;
             if r_int >= 0 && r_int < self.rows as i32 {
@@ -107,6 +114,7 @@ impl Effect for Hologram {
                     }
                 }
             }
+        }
         }
 
         // Reveal target cells (overwrites scan stripes where they coincide).

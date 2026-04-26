@@ -8,8 +8,12 @@ use shedos_screensaver_effects::{target, EffectCtx, Registry};
 use std::path::PathBuf;
 use std::time::Duration;
 
-const ROWS: u16 = 10;
-const COLS: u16 = 50;
+// Pick a canvas size that triggers auto-scaling for the test logo
+// (5×23). At 40×120 the auto-scale factor lands at 3 (= 15×69 rendered)
+// — exercises the post-scale code paths that the previous 10×50 canvas
+// silently bypassed.
+const ROWS: u16 = 40;
+const COLS: u16 = 120;
 const SEED: u64 = 0xCAFEF00DBADBABE5;
 const FRAME_DT: Duration = Duration::from_millis(50);
 

@@ -103,6 +103,8 @@ struct Cli {
     duration: Option<f32>,
 
     /// Hold the resolved art for this many seconds between effects.
+    /// 0 = one-shot mode: animate once and sit on the resolved art
+    /// until --duration / signal / keypress.
     #[arg(long, value_name = "SECS", default_value_t = 3.0)]
     hold: f32,
 
@@ -379,6 +381,16 @@ impl Engine {
                         continue;
                     }
                     frame.clone_from(target);
+                    // `--hold 0` means "one-shot": animate to completion,
+                    // then sit on the resolved art forever (or until
+                    // SIGINT / SIGUSR1 / a keypress / `--duration`).
+                    // Without this, hold=0 restarts the animation every
+                    // frame so the completed art flashes for ~33 ms
+                    // (one frame) and disappears, which feels broken.
+                    // Cycling mode (--hold > 0) is unchanged.
+                    if self.hold.is_zero() {
+                        return;
+                    }
                     if dt >= *holds_remaining {
                         self.start_session(registry, rows, cols);
                     } else {
@@ -677,6 +689,87 @@ mod tests {
     #[test]
     fn logos_count() {
         assert!(logos::LIBRARY.len() >= 8);
+    }
+
+    #[test]
+    fn engine_hold_zero_is_one_shot_mode() {
+        // Regression: the user passed `--effect=rain --logo=small
+        // --duration=6 --hold=0` and saw the animation re-render
+        // twice without the SHEDOS art ever staying complete on
+        // screen. With hold=0, after the effect resolves the engine
+        // must sit on the resolved frame instead of restarting.
+        let mut engine = Engine::new(
+            Some("small".to_string()),
+            Some("rain".to_string()),
+            vec![],
+            None,
+            Duration::ZERO,
+            None,
+        );
+        let registry = EffectsRegistry::new();
+        let mut frame = Frame::new(40, 120);
+
+        // Step the engine forward through the rain effect's full
+        // 4.5 s duration plus a margin.
+        let dt = Duration::from_millis(50);
+        let mut transitions_to_holding = 0;
+        let mut iterations_after_first_hold = 0;
+        for _ in 0..200 {
+            engine.produce(&mut frame, &registry, dt);
+            if matches!(engine.state, EngineState::Holding { .. }) {
+                if transitions_to_holding == 0 {
+                    transitions_to_holding += 1;
+                }
+                iterations_after_first_hold += 1;
+            } else if matches!(engine.state, EngineState::Animating { .. })
+                && transitions_to_holding > 0
+            {
+                panic!(
+                    "engine restarted a new animation under --hold=0; \
+                     it should sit on the resolved frame in one-shot mode"
+                );
+            }
+        }
+        assert!(transitions_to_holding > 0, "rain never completed in 200 ticks");
+        assert!(
+            iterations_after_first_hold > 50,
+            "engine spent only {iterations_after_first_hold} ticks in Holding; should have stayed there"
+        );
+    }
+
+    #[test]
+    fn engine_hold_positive_does_cycle() {
+        // Sanity counterpart: with hold=0.5 s the engine MUST
+        // restart a new animation after the hold expires. Locks in
+        // that the hold=0 special case above doesn't accidentally
+        // freeze cycling mode.
+        let mut engine = Engine::new(
+            Some("small".to_string()),
+            Some("rain".to_string()),
+            vec![],
+            None,
+            Duration::from_millis(500),
+            None,
+        );
+        let registry = EffectsRegistry::new();
+        let mut frame = Frame::new(40, 120);
+        let dt = Duration::from_millis(50);
+
+        let mut entered_hold = false;
+        let mut restarted_after_hold = false;
+        for _ in 0..400 {
+            engine.produce(&mut frame, &registry, dt);
+            match &engine.state {
+                EngineState::Holding { .. } => entered_hold = true,
+                EngineState::Animating { .. } if entered_hold => {
+                    restarted_after_hold = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(entered_hold, "rain never reached Holding state");
+        assert!(restarted_after_hold, "engine never restarted after hold expired");
     }
 }
 
