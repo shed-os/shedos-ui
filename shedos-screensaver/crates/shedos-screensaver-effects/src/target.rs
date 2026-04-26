@@ -1,12 +1,12 @@
 //! Helpers for rendering a Logo onto a Frame as the target state.
 //!
 //! The art is integer-scaled (cell replication) so SHEDOS fills the
-//! canvas like Omarchy's screensaver does — each lit cell of the
-//! logo becomes an N×N block of canvas cells, where N is the largest
-//! integer that keeps the rendered art within ~75% of the canvas.
-//! Solid-block variants (`block`, `mini`) scale crisply; line-drawing
-//! variants tile their glyphs (which still reads as a stylized "big"
-//! version of the letter, similar to a half-tone print).
+//! canvas — each lit cell of the logo becomes an N×N block of canvas
+//! cells, where N is the largest integer that keeps the rendered art
+//! within ~75% of the canvas. Solid-block variants (`block`, `mini`)
+//! scale crisply; line-drawing variants tile their glyphs (which
+//! still reads as a stylized "big" version of the letter, similar to
+//! a half-tone print).
 
 use shedos_screensaver_core::{Cell, Color, Frame, Logo};
 

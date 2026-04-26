@@ -1,7 +1,8 @@
 //! burn — fire rises from the bottom of the canvas, consuming
 //! blank space; in its wake the target cells appear, glowing first
-//! with ember colors, then settling to the final color. Inspired by
-//! tte's "burn" but recast as a reveal rather than a consumption.
+//! with ember colors, then settling to the final color. A reveal
+//! effect, not a consumption — the canvas starts blank and ends
+//! with the SHEDOS art lit.
 
 use crate::{AudioFrame, Cell, Color, Effect, EffectCtx, Frame};
 use std::time::Duration;

@@ -1,11 +1,11 @@
 //! Animation effects that *form* an ASCII-art target into existence
 //! on a canvas.
 //!
-//! This is the Omarchy/tte mental model: you start with a blank
-//! canvas and a target Frame (the desired final state, e.g. a
-//! SHEDOS variant rendered at the canvas size), and the effect's
-//! job is to drive the canvas from blank → target through some
-//! visually interesting intermediate frames.
+//! The model: you start with a blank canvas and a target Frame
+//! (the desired final state — e.g. a SHEDOS variant rendered at the
+//! canvas size), and the effect's job is to drive the canvas from
+//! blank → target through some visually interesting intermediate
+//! frames.
 //!
 //! Every effect implements [`Effect`]; the catalog of registered
 //! effects lives in [`registry::Registry`]. New effects drop into

@@ -5,8 +5,8 @@
 //! default; `--logo=NAME` and/or `--effect=NAME` lock either axis),
 //! renders the logo to a target Frame, runs the effect to completion
 //! against that target, then holds the resolved art for `--hold`
-//! seconds before picking a new pair. This is the Omarchy/tte mental
-//! model — animation forms art into existence.
+//! seconds before picking a new pair. The animation IS how the
+//! SHEDOS art appears.
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::Shell;

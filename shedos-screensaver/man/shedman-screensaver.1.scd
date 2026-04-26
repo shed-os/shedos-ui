@@ -11,21 +11,22 @@ shedman-screensaver - animated SHEDOS screensaver (TTY + Wayland)
 
 # DESCRIPTION
 
-Animates SHEDOS ASCII art into existence using one of 16 forming
+Animates SHEDOS ASCII art into existence using one of 26 forming
 effects (rain, decrypt, scattered, glitch, hologram, …). Each cycle
 picks a logo variant + an effect, animates the variant in, holds
 the resolved art for *--hold* seconds, then picks a new pair and
-loops. The Omarchy / TerminalTextEffects mental model: *the
-animation is how the art appears*.
+loops. *The animation is how the art appears* — every effect takes
+a target Frame (the SHEDOS variant rendered at the canvas size) and
+drives the canvas from blank to that target.
 
 The same binary backs both surfaces — pass *--mode=tty* or
 *--mode=wayland* to force one. Default *--mode=auto* picks Wayland
 when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
 Eight SHEDOS art variants ship in the catalog (block, ansi-shadow,
-slant, big, small, doom, outline, mini). Sixteen effects ship in
-the registry. With both axes random, that's 128 visually distinct
-sessions.
+slant, big, small, doom, outline, mini). Twenty-six effects ship
+in the registry. With both axes random, that's 208 visually
+distinct sessions.
 
 # READ-ONLY OPTIONS
 
