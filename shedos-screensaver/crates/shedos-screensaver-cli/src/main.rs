@@ -1,29 +1,27 @@
 //! `shedos-screensaver` CLI binary.
 //!
-//! Stage-2 surface: parsing, --help, --help-summary, --list,
-//! --help-style, --version, --complete-{bash,zsh,fish}, --color
-//! validation, --style validation against the const style table.
-//! Actual frame loop and renderers land in stages 3+.
+//! Stage 3 surface: TTY backend wired, all 8 styles invokable,
+//! real frame loop with FPS pacing, --duration / --random /
+//! --shuffle / --idle-daemon. Wayland + audio remain stub paths
+//! (Wayland mode prints "not yet wired" and exits 0; that work
+//! lands in stages 4+).
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::Shell;
-use shedos_screensaver_core::Color;
+use crossterm::event::{self, Event, KeyCode};
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
+use shedos_screensaver_core::{Clock, Color, Frame, Logo, RealClock, SignalListener};
 use shedos_screensaver_i18n::{t, t_str, I18n};
+use shedos_screensaver_styles::{Ctx, Registry, Style, StyleOpts};
+use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
 use std::io;
 use std::process::ExitCode;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
-const STYLE_KEYS: &[&str] = &[
-    "logo-bounce",
-    "matrix",
-    "plasma",
-    "starfield",
-    "conway",
-    "tunnel",
-    "waves",
-    "mandala",
-];
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum Mode {
     Tty,
     Wayland,
@@ -47,82 +45,60 @@ enum AudioSource {
     disable_help_flag = false,
 )]
 struct Cli {
-    /// Print a one-line summary and exit (used by `shedman help`).
     #[arg(long)]
     help_summary: bool,
 
-    /// List all available styles and exit.
     #[arg(long)]
     list: bool,
 
-    /// Print the option schema for one style and exit.
     #[arg(long, value_name = "NAME")]
     help_style: Option<String>,
 
-    /// Emit a bash completion script and exit.
     #[arg(long)]
     complete_bash: bool,
 
-    /// Emit a zsh completion script and exit.
     #[arg(long)]
     complete_zsh: bool,
 
-    /// Emit a fish completion script and exit.
     #[arg(long)]
     complete_fish: bool,
 
-    /// Style to render (one of: logo-bounce, matrix, plasma, starfield,
-    /// conway, tunnel, waves, mandala). Required unless --random or
-    /// [defaults].style is set in /etc/shedos/screensaver.toml.
     #[arg(long, value_name = "NAME")]
     style: Option<String>,
 
-    /// Color override; accepts #rrggbb, r,g,b, named ANSI, or
-    /// Catppuccin Mocha shorthand (blue/mauve/peach/text/...).
     #[arg(long, value_name = "SPEC")]
     color: Option<String>,
 
-    /// Per-style typed override; repeatable. Example: --style-opt density=0.7
     #[arg(long = "style-opt", value_name = "KEY=VAL", action = ArgAction::Append)]
     style_opts: Vec<String>,
 
-    /// Render backend.
     #[arg(long, value_enum, default_value_t = Mode::Auto)]
     mode: Mode,
 
-    /// Frames per second; 30 default for TTY, 60 default for Wayland.
     #[arg(long, value_name = "N")]
     fps: Option<u32>,
 
-    /// Auto-exit after this many seconds (used by tests).
     #[arg(long, value_name = "SECS")]
     duration: Option<f32>,
 
-    /// Pick a random style at start.
     #[arg(long)]
     random: bool,
 
-    /// Rotate styles every N seconds.
     #[arg(long, value_name = "SECS")]
     shuffle: Option<u32>,
 
-    /// Long-running mode for hypridle: ignores keyboard, only exits on SIGUSR1.
     #[arg(long)]
     idle_daemon: bool,
 
-    /// Audio reactivity source.
     #[arg(long, value_enum, default_value_t = AudioSource::None)]
     audio_source: AudioSource,
 
-    /// Wallpaper for Wayland background layer; "auto" uses ~/.config/hypr/wallpaper.png; "none" disables.
     #[arg(long, value_name = "PATH|none|auto", default_value = "auto")]
     wallpaper: String,
 
-    /// Wallpaper backdrop dimming factor (0.0..=1.0).
     #[arg(long, value_name = "F", default_value_t = 0.3)]
     wallpaper_dim: f32,
 
-    /// Override system locale (BCP-47, e.g. en-US, fr-FR).
     #[arg(long, value_name = "BCP47")]
     locale: Option<String>,
 }
@@ -138,7 +114,6 @@ fn main() -> ExitCode {
         println!("{}", t("help-summary"));
         return ExitCode::SUCCESS;
     }
-
     if cli.complete_bash {
         emit_completion(Shell::Bash);
         return ExitCode::SUCCESS;
@@ -152,68 +127,221 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    let registry = Registry::new();
+
     if cli.list {
-        print_list();
+        print_list(&registry);
         return ExitCode::SUCCESS;
     }
 
     if let Some(style_name) = &cli.help_style {
-        return print_help_style(style_name);
+        return print_help_style(&registry, style_name);
     }
 
-    // Validations (stage 2 surface): style + color + style-opt syntax.
-    // Renderer dispatch lands in stages 3-5.
+    // ----- validations -----
     if let Some(s) = &cli.style {
-        if !STYLE_KEYS.contains(&s.as_str()) {
+        if registry.get(s).is_none() {
             eprintln!("error: {}", t_str("error-unknown-style", &[("name", s)]));
             return ExitCode::from(2);
         }
     }
+    let color_override = match &cli.color {
+        Some(c) => match Color::parse(c) {
+            Ok(col) => Some(col),
+            Err(_) => {
+                eprintln!("error: {}", t_str("error-invalid-color", &[("spec", c)]));
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
 
-    if let Some(c) = &cli.color {
-        if Color::parse(c).is_err() {
-            eprintln!("error: {}", t_str("error-invalid-color", &[("spec", c)]));
+    // ----- pick the style sequence -----
+    let mut shuffle_keys: Vec<String> = registry.keys().map(str::to_string).collect();
+    let mut rng = ChaCha8Rng::from_entropy();
+    let initial_style: String = if cli.random {
+        shuffle_keys.shuffle(&mut rng);
+        shuffle_keys[0].clone()
+    } else if let Some(s) = &cli.style {
+        s.clone()
+    } else {
+        // No style + not random: default to logo-bounce.
+        "logo-bounce".to_string()
+    };
+
+    // ----- mode dispatch -----
+    let resolved_mode = resolve_mode(cli.mode);
+    if resolved_mode == Mode::Wayland {
+        // Wayland renderer lands in stage 4. For stage 3, fall back to
+        // TTY with a warning so any hypridle-launched test still functions.
+        eprintln!("note: --mode=wayland not yet wired; falling back to TTY (stage 3 surface)");
+    }
+
+    // ----- TTY frame loop -----
+    let signal_listener = match SignalListener::install() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("warning: could not install signal handlers: {e}");
+            // Continue without; the only fallout is Ctrl-C exits abruptly.
+            SignalListener::install().unwrap_or_else(|_| panic!("signal install retry failed"))
+        }
+    };
+    let exit_flag = signal_listener.flag();
+
+    // Validate per-style options against the chosen style's schema.
+    let initial_factory = registry.get(&initial_style).expect("validated above");
+    let mut style: Box<dyn Style> = initial_factory();
+    let schema = style.option_schema();
+    let mut opts = StyleOpts::from_defaults(schema);
+    for kv in &cli.style_opts {
+        if let Err(e) = opts.set(schema, kv) {
+            eprintln!("error: {e}");
             return ExitCode::from(2);
         }
     }
 
-    for opt in &cli.style_opts {
-        if !opt.contains('=') || opt.starts_with('=') || opt.ends_with('=') {
-            eprintln!("error: {}", t_str("error-invalid-style-opt", &[("arg", opt)]));
-            return ExitCode::from(2);
+    let logo = match Logo::load_default() {
+        Ok(l) => l,
+        Err(_) => {
+            // /etc/shedos-ascii.txt missing — synthesize a tiny fallback so
+            // the renderer still has something to show.
+            Logo::parse(
+                "███████\n█     █\n███████\n",
+                std::path::PathBuf::from("fallback"),
+            )
+        }
+    };
+
+    let (rows, cols) = detect_terminal_size();
+    let fps = cli.fps.unwrap_or(30).max(1);
+
+    let _guard: Option<TerminalGuard> = if stdout_is_tty() && !cli.idle_daemon {
+        match TerminalGuard::enter() {
+            Ok(g) => Some(g),
+            Err(e) => {
+                eprintln!("warning: could not enter alt-screen + raw-mode: {e}; running anyway");
+                None
+            }
+        }
+    } else if stdout_is_tty() && cli.idle_daemon {
+        // Idle-daemon mode still needs alt-screen + cursor-hide.
+        match TerminalGuard::enter() {
+            Ok(g) => Some(g),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let stdout = io::stdout();
+    let mut renderer = TtyRenderer::new(stdout.lock(), rows, cols);
+    let clock = RealClock::new();
+    let frame_budget = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut frame = Frame::new(rows, cols);
+    let start = clock.elapsed();
+    let mut last = start;
+    let mut style_started = start;
+
+    // Main loop.
+    loop {
+        if exit_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        if let Some(d) = cli.duration {
+            if (clock.elapsed() - start).as_secs_f32() >= d {
+                break;
+            }
+        }
+        if let Some(s) = cli.shuffle {
+            if (clock.elapsed() - style_started).as_secs() >= s as u64 {
+                shuffle_keys.shuffle(&mut rng);
+                let next = shuffle_keys[0].clone();
+                if let Some(factory) = registry.get(&next) {
+                    style = factory();
+                    let new_schema = style.option_schema();
+                    opts = StyleOpts::from_defaults(new_schema);
+                    // Style-opts only apply to the user's chosen --style, not to
+                    // shuffle picks; shuffle uses each style's own defaults.
+                    style_started = clock.elapsed();
+                    renderer.invalidate();
+                }
+            }
+        }
+
+        // Keypress exit (TTY mode only; idle-daemon ignores keypress).
+        if !cli.idle_daemon && stdout_is_tty() {
+            if event::poll(Duration::from_millis(0)).unwrap_or(false) {
+                if let Ok(ev) = event::read() {
+                    if matches!(ev, Event::Key(_) | Event::Resize(_, _)) {
+                        if let Event::Key(ke) = ev {
+                            if !matches!(ke.code, KeyCode::Null) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let now = clock.elapsed();
+        let dt = now - last;
+        last = now;
+        frame.clear();
+
+        let color = color_override.unwrap_or_else(|| style.default_color());
+        let mut ctx = Ctx { t: now - style_started, dt, color, logo: &logo, opts: &opts, rng: &mut rng };
+        style.draw(&mut frame, &mut ctx);
+        if let Err(e) = renderer.submit(&frame) {
+            eprintln!("renderer error: {e}");
+            break;
+        }
+
+        // FPS pacing.
+        let next_frame_at = now + frame_budget;
+        let after_render = clock.elapsed();
+        if next_frame_at > after_render {
+            std::thread::sleep(next_frame_at - after_render);
         }
     }
 
-    // Stage 2 ends here. Future stages dispatch into TtyRenderer or
-    // WaylandRenderer. For now, surface a clear "not yet wired" notice
-    // ONLY when invoked without one of the read-only flags above —
-    // tests T1-T10 hit only those paths.
-    eprintln!(
-        "shedos-screensaver: renderer backends are not wired yet (stage 2 surface). \
-         CLI parsed cleanly: style={:?}, color={:?}, mode={:?}.",
-        cli.style, cli.color, cli.mode
-    );
     ExitCode::SUCCESS
 }
 
-fn print_list() {
+fn resolve_mode(m: Mode) -> Mode {
+    match m {
+        Mode::Tty | Mode::Wayland => m,
+        Mode::Auto => {
+            // Prefer TTY when invoked from an interactive terminal, even if
+            // WAYLAND_DISPLAY is set (terminal users probably want their
+            // animation in the terminal). Choose Wayland only when stdout
+            // isn't a TTY (the hypridle path).
+            if stdout_is_tty() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
+                Mode::Tty
+            } else {
+                Mode::Wayland
+            }
+        }
+    }
+}
+
+fn print_list(registry: &Registry) {
     println!("{}", t("list-header"));
-    for &key in STYLE_KEYS {
+    for key in registry.keys() {
+        let style = registry.instantiate(key).expect("registry key returned None");
         let title_key = format!("style-{key}-title");
         let title = t(&title_key);
-        let color = default_color_label(key);
+        let _ = style.default_color();
+        let color_label = default_color_label(key);
         println!(
             "  {}",
             t_str(
                 "list-style-line",
-                &[("key", key), ("title", title.as_str()), ("color", color)],
+                &[("key", key), ("title", title.as_str()), ("color", color_label)],
             )
         );
     }
 }
 
-/// Per-style default color labels (mirrors the style table from the plan;
-/// real Style trait impls land in stage 3 and will replace this lookup).
 fn default_color_label(key: &str) -> &'static str {
     match key {
         "logo-bounce" | "tunnel" => "blue",
@@ -225,77 +353,42 @@ fn default_color_label(key: &str) -> &'static str {
     }
 }
 
-fn print_help_style(name: &str) -> ExitCode {
-    if !STYLE_KEYS.contains(&name) {
-        eprintln!("error: {}", t_str("error-unknown-style", &[("name", name)]));
-        return ExitCode::from(2);
-    }
+fn print_help_style(registry: &Registry, name: &str) -> ExitCode {
+    let factory = match registry.get(name) {
+        Some(f) => f,
+        None => {
+            eprintln!("error: {}", t_str("error-unknown-style", &[("name", name)]));
+            return ExitCode::from(2);
+        }
+    };
+    let style = factory();
+    let schema = style.option_schema();
     println!("{}", t_str("help-style-header", &[("name", name)]));
-    for opt in style_options(name) {
+    if schema.options.is_empty() {
+        println!("  {}", t("help-style-no-options"));
+        return ExitCode::SUCCESS;
+    }
+    for opt in schema.options {
+        let default = match &opt.default {
+            shedos_screensaver_styles::OptVal::Bool(b) => b.to_string(),
+            shedos_screensaver_styles::OptVal::UInt(u) => u.to_string(),
+            shedos_screensaver_styles::OptVal::Float(f) => format!("{f}"),
+            shedos_screensaver_styles::OptVal::String(s) => s.clone(),
+        };
         println!(
             "  {}",
             t_str(
                 "help-style-line",
                 &[
                     ("key", opt.key),
-                    ("ty", opt.ty),
-                    ("default", opt.default),
+                    ("ty", opt.ty.label()),
+                    ("default", default.as_str()),
                     ("desc", opt.desc),
                 ],
             )
         );
     }
     ExitCode::SUCCESS
-}
-
-#[derive(Debug, Clone, Copy)]
-struct StyleOptionDoc {
-    key: &'static str,
-    ty: &'static str,
-    default: &'static str,
-    desc: &'static str,
-}
-
-/// Per-style option schema docs — stage 2 const table.
-/// Stage 3 wires this into the real Style trait via OptionSchema.
-fn style_options(name: &str) -> &'static [StyleOptionDoc] {
-    match name {
-        "matrix" => &[
-            StyleOptionDoc { key: "density", ty: "f32 (0.0..=1.0)", default: "0.5", desc: "probability per column per frame of starting a new trail" },
-            StyleOptionDoc { key: "trail_length", ty: "u32 (1..=100)", default: "20", desc: "trail length in cells" },
-            StyleOptionDoc { key: "glyphs", ty: "enum", default: "katakana", desc: "katakana | ascii | hex | brand" },
-        ],
-        "conway" => &[
-            StyleOptionDoc { key: "rule", ty: "str (B/S notation)", default: "B3/S23", desc: "Game of Life rule" },
-            StyleOptionDoc { key: "reseed_interval", ty: "u32 (1..=600)", default: "30", desc: "reseed from logo every N seconds" },
-        ],
-        "plasma" => &[
-            StyleOptionDoc { key: "freq_x", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "X-axis spatial frequency" },
-            StyleOptionDoc { key: "freq_y", ty: "f32 (0.1..=10.0)", default: "1.5", desc: "Y-axis spatial frequency" },
-        ],
-        "starfield" => &[
-            StyleOptionDoc { key: "count", ty: "u32 (1..=10000)", default: "200", desc: "number of stars" },
-            StyleOptionDoc { key: "warp_factor", ty: "f32 (1.0..=100.0)", default: "5.0", desc: "speed of perspective motion" },
-        ],
-        "logo-bounce" => &[
-            StyleOptionDoc { key: "speed", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "multiplier on bounce velocity" },
-            StyleOptionDoc { key: "color_cycle", ty: "bool", default: "true", desc: "shift color on each wall hit" },
-        ],
-        "tunnel" => &[
-            StyleOptionDoc { key: "rings", ty: "u32 (5..=50)", default: "20", desc: "number of concentric rings" },
-            StyleOptionDoc { key: "speed", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "inward zoom speed multiplier" },
-        ],
-        "waves" => &[
-            StyleOptionDoc { key: "wavelength_x", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "X-axis wavelength" },
-            StyleOptionDoc { key: "wavelength_y", ty: "f32 (0.1..=10.0)", default: "1.5", desc: "Y-axis wavelength" },
-            StyleOptionDoc { key: "speed", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "phase advance per second" },
-        ],
-        "mandala" => &[
-            StyleOptionDoc { key: "symmetry", ty: "u32 (2..=16)", default: "8", desc: "N-fold rotational symmetry" },
-            StyleOptionDoc { key: "growth", ty: "f32 (0.1..=10.0)", default: "1.0", desc: "growth speed of kernel" },
-        ],
-        _ => &[],
-    }
 }
 
 fn emit_completion(shell: Shell) {
@@ -310,40 +403,12 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn style_keys_match_plan() {
-        // The plan pins exactly 8 styles; any drift from this list is a bug.
-        assert_eq!(STYLE_KEYS.len(), 8);
-        let expected = [
-            "logo-bounce",
-            "matrix",
-            "plasma",
-            "starfield",
-            "conway",
-            "tunnel",
-            "waves",
-            "mandala",
-        ];
-        for key in expected {
-            assert!(STYLE_KEYS.contains(&key), "missing style key: {key}");
-        }
-    }
-
-    #[test]
-    fn every_style_has_an_options_table() {
-        for &k in STYLE_KEYS {
-            let opts = style_options(k);
-            assert!(!opts.is_empty(), "style {k} has no options table");
-        }
-    }
-
-    #[test]
-    fn unknown_style_options_returns_empty() {
-        assert!(style_options("nope").is_empty());
+    fn registry_count_matches_plan() {
+        assert_eq!(Registry::new().len(), 8);
     }
 
     #[test]
     fn cli_parses_all_documented_flags() {
-        // Smoke test: every flag the CLI advertises must parse.
         let _ = Cli::try_parse_from([
             "shedos-screensaver",
             "--style", "matrix",
@@ -363,7 +428,6 @@ mod tests {
 
     #[test]
     fn clap_command_is_well_formed() {
-        // Sanity: clap's own validation catches contradictory definitions.
         Cli::command().debug_assert();
     }
 }

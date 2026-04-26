@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/shedos-screensaver-core",
     "crates/shedos-screensaver-i18n",
+    "crates/shedos-screensaver-styles",
+    "crates/shedos-screensaver-tty",
     "crates/shedos-screensaver-cli",
 ]
 
@@ -25,9 +27,16 @@ clap_complete = "4.5"
 fluent = "0.16"
 fluent-bundle = "0.15"
 unic-langid = { version = "0.9", features = ["macros"] }
+crossterm = "0.28"
+rand = "0.8"
+rand_chacha = "0.3"
+signal-hook = "0.3"
+insta = "1"
 
 shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
 shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
+shedos-screensaver-styles = { path = "crates/shedos-screensaver-styles" }
+shedos-screensaver-tty = { path = "crates/shedos-screensaver-tty" }
 
 [profile.release]
 lto = "thin"

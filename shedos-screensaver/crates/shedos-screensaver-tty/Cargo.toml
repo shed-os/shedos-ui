@@ -1,12 +1,13 @@
 [package]
-name = "shedos-screensaver-core"
+name = "shedos-screensaver-tty"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Foundation crate: Frame, Color, Clock, Logo, Catppuccin palette"
+description = "Crossterm-based TTY renderer for shedos-screensaver"
 
 [dependencies]
-signal-hook.workspace = true
+shedos-screensaver-core.workspace = true
+crossterm.workspace = true
