@@ -54,6 +54,9 @@ impl Style for Tunnel {
     fn draw(&mut self, frame: &mut Frame, ctx: &mut Ctx<'_>) {
         let rings = ctx.opts.get_u32("rings").unwrap_or(20) as f32;
         let speed = ctx.opts.get_f32("speed").unwrap_or(1.0);
+        // Audio reactivity: peak amplitude brightens the rings.
+        let peak = ctx.audio.map(|a| a.peak).unwrap_or(0.0);
+        let intensity_boost = 1.0 + peak * 0.7;
         let t = ctx.t.as_secs_f32() * speed;
         let cx = frame.cols() as f32 * 0.5;
         let cy = frame.rows() as f32 * 0.5;
@@ -71,7 +74,8 @@ impl Style for Tunnel {
                 let ring_pos = (normalized * rings - t * 4.0).fract();
                 let ring_thickness = 0.18;
                 if ring_pos < ring_thickness {
-                    let intensity = 1.0 - (1.0 - normalized).powi(2);
+                    let intensity = (1.0 - (1.0 - normalized).powi(2)) * intensity_boost;
+                    let intensity = intensity.clamp(0.0, 1.0);
                     let base = ctx.color;
                     let fg = Color::rgb(
                         (base.r as f32 * intensity) as u8,

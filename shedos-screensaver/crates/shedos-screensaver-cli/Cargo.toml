@@ -22,3 +22,5 @@ shedos-screensaver-core.workspace = true
 shedos-screensaver-i18n.workspace = true
 shedos-screensaver-styles.workspace = true
 shedos-screensaver-tty.workspace = true
+shedos-screensaver-wayland.workspace = true
+shedos-screensaver-audio.workspace = true

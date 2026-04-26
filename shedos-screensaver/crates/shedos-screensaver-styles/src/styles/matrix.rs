@@ -96,37 +96,32 @@ impl Style for Matrix {
         }
 
         let glyph_set = ctx.opts.get_str("glyphs").unwrap_or("katakana");
-        let chars: &[char] = match glyph_set {
-            "ascii" => {
-                self.glyph_chars = ASCII_GL.chars().collect();
-                &self.glyph_chars
-            }
-            "hex" => {
-                self.glyph_chars = HEX_GL.chars().collect();
-                &self.glyph_chars
-            }
-            "brand" => {
-                self.glyph_chars = BRAND_GL.chars().collect();
-                &self.glyph_chars
-            }
-            _ => {
-                if !std::ptr::eq::<[char]>(&self.glyph_chars[..], KATAKANA.chars().collect::<Vec<_>>().as_slice()) {
-                    // already populated; only swap if needed
-                }
-                if self.glyph_chars.is_empty() || self.glyph_chars.first() != Some(&'ア') {
-                    self.glyph_chars = KATAKANA.chars().collect();
-                }
-                &self.glyph_chars
-            }
+        let want = match glyph_set {
+            "ascii" => ASCII_GL,
+            "hex" => HEX_GL,
+            "brand" => BRAND_GL,
+            _ => KATAKANA,
         };
+        // Re-rebuild only when the glyph set actually changed; comparing
+        // first char is enough since each set has a unique opening glyph
+        // (ア / a / 0 / S / アー).
+        let want_first = want.chars().next();
+        if self.glyph_chars.first().copied() != want_first {
+            self.glyph_chars = want.chars().collect();
+        }
+        let chars: &[char] = &self.glyph_chars;
 
         let density = ctx.opts.get_f32("density").unwrap_or(0.5);
         let trail_len = ctx.opts.get_u32("trail_length").unwrap_or(20) as i32;
         let dt = ctx.dt.as_secs_f32();
+        // Audio reactivity: a beat triggers a one-frame burst of spawns.
+        let beat_burst = if ctx.audio.map(|a| a.beat).unwrap_or(false) { 4.0 } else { 1.0 };
 
         // Spawn new trails for empty columns.
         for col in 0..cols {
-            if self.trails[col].is_none() && ctx.rng.gen::<f32>() < density * dt * 4.0 {
+            if self.trails[col].is_none()
+                && ctx.rng.gen::<f32>() < density * dt * 4.0 * beat_burst
+            {
                 let speed = ctx.rng.gen_range(8.0..30.0);
                 self.trails[col] = Some(Trail { head: 0.0, speed });
             }

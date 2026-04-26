@@ -74,7 +74,7 @@ fn run_n_frames(style_key: &str, n: usize) -> String {
 
     for i in 0..n {
         frame.clear();
-        let mut ctx = Ctx { t, dt, color, logo: &logo, opts: &opts, rng: &mut rng };
+        let mut ctx = Ctx { t, dt, color, logo: &logo, opts: &opts, rng: &mut rng, audio: None };
         style.draw(&mut frame, &mut ctx);
         all.push_str(&format!("--- frame {i} (t={}ms) ---\n", t.as_millis()));
         all.push_str(&digest(&frame));

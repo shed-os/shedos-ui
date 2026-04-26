@@ -65,6 +65,13 @@ impl Style for Starfield {
     fn draw(&mut self, frame: &mut Frame, ctx: &mut Ctx<'_>) {
         let count = ctx.opts.get_u32("count").unwrap_or(200) as usize;
         let warp = ctx.opts.get_f32("warp_factor").unwrap_or(5.0);
+        // Audio reactivity: a beat doubles warp factor for that frame
+        // (snapshot effect — feels like an FTL "kick").
+        let warp = if ctx.audio.map(|a| a.beat).unwrap_or(false) {
+            warp * 2.0
+        } else {
+            warp
+        };
         let dt = ctx.dt.as_secs_f32();
 
         // (Re)populate to current count.

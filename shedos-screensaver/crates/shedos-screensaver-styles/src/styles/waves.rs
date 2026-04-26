@@ -62,18 +62,25 @@ impl Style for Waves {
         let wlx = ctx.opts.get_f32("wavelength_x").unwrap_or(1.0);
         let wly = ctx.opts.get_f32("wavelength_y").unwrap_or(1.5);
         let speed = ctx.opts.get_f32("speed").unwrap_or(1.0);
+        // Audio reactivity: bass shifts wavelength inward (denser waves);
+        // peak boosts amplitude (brighter glyphs).
+        let bass = ctx.audio.map(|a| a.bass(4)).unwrap_or(0.0);
+        let peak = ctx.audio.map(|a| a.peak).unwrap_or(0.0);
+        let wlx = wlx * (1.0 + bass * 0.5);
+        let wly = wly * (1.0 + bass * 0.3);
+        let amp_boost = 1.0 + peak * 0.5;
         let t = ctx.t.as_secs_f32() * speed;
         let cols = frame.cols() as f32;
         let rows = frame.rows() as f32;
 
         for r in 0..frame.rows() {
             for c in 0..frame.cols() {
-                let xn = c as f32 / cols * 6.28318 * wlx;
-                let yn = r as f32 / rows * 6.28318 * wly;
+                let xn = c as f32 / cols * std::f32::consts::TAU * wlx;
+                let yn = r as f32 / rows * std::f32::consts::TAU * wly;
                 let v1 = (xn + t).sin();
                 let v2 = (yn + t * 1.3).cos();
                 let v = (v1 + v2) * 0.5; // -1..1
-                let intensity = (v + 1.0) * 0.5; // 0..1
+                let intensity = ((v + 1.0) * 0.5 * amp_boost).clamp(0.0, 1.0); // 0..1
                 let idx = (intensity * (RAMP.len() - 1) as f32).round() as usize;
                 let glyph = RAMP[idx.min(RAMP.len() - 1)];
                 if glyph == ' ' {

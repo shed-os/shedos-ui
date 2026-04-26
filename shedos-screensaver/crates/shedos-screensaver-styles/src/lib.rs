@@ -11,7 +11,7 @@ pub mod styles;
 
 pub use opts::{OptType, OptVal, OptionDoc, OptionSchema, OptionSetError, StyleOpts};
 pub use registry::{Registry, StyleFactory};
-pub use shedos_screensaver_core::{Color, Frame, Logo};
+pub use shedos_screensaver_core::{AudioFrame, Color, Frame, Logo};
 
 use rand_chacha::ChaCha8Rng;
 use std::time::Duration;
@@ -31,6 +31,11 @@ pub struct Ctx<'a> {
     /// Deterministic RNG. Live mode seeds from process entropy; tests
     /// seed from a fixed value so snapshots are stable.
     pub rng: &'a mut ChaCha8Rng,
+    /// Audio analysis frame, when `--audio-source` is enabled and
+    /// pipewire is reachable; `None` otherwise. Styles that opted in
+    /// via `wants_audio()` should drive their visuals from this when
+    /// present and fall back to time-only otherwise.
+    pub audio: Option<&'a AudioFrame>,
 }
 
 /// One animation style.

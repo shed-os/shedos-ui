@@ -52,14 +52,20 @@ impl Style for Plasma {
     fn draw(&mut self, frame: &mut Frame, ctx: &mut Ctx<'_>) {
         let fx = ctx.opts.get_f32("freq_x").unwrap_or(1.0);
         let fy = ctx.opts.get_f32("freq_y").unwrap_or(1.5);
+        // Audio reactivity: bass deforms freq_x; treble deforms freq_y.
+        // Range expansion is gentle (≤ ~1× extra) so visuals stay smooth.
+        let bass = ctx.audio.map(|a| a.bass(4)).unwrap_or(0.0);
+        let treble = ctx.audio.map(|a| a.band_range(20, 32)).unwrap_or(0.0);
+        let fx = fx * (1.0 + bass);
+        let fy = fy * (1.0 + treble * 0.7);
         let t = ctx.t.as_secs_f32();
         let rows = frame.rows() as f32;
         let cols = frame.cols() as f32;
 
         for r in 0..frame.rows() {
             for c in 0..frame.cols() {
-                let x = c as f32 / cols * 6.28318 * fx;
-                let y = r as f32 / rows * 6.28318 * fy;
+                let x = c as f32 / cols * std::f32::consts::TAU * fx;
+                let y = r as f32 / rows * std::f32::consts::TAU * fy;
                 let v = (x + t * 0.7).sin()
                     + (y + t * 0.5).cos()
                     + ((x * 0.5 + y * 0.5) + t * 0.3).sin();
@@ -80,7 +86,7 @@ impl Style for Plasma {
 
 fn plasma_color(n: f32, base: Color) -> (u8, u8, u8) {
     // Tone-shift the base color through a small phase wheel.
-    let t = (n * 6.28318).sin() * 0.5 + 0.5;
+    let t = (n * std::f32::consts::TAU).sin() * 0.5 + 0.5;
     let r = lerp(base.r as f32 * 0.3, base.r as f32, t) as u8;
     let g = lerp(base.g as f32 * 0.3, base.g as f32, t) as u8;
     let b = lerp(base.b as f32 * 0.3, base.b as f32, t) as u8;

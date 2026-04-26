@@ -1,0 +1,84 @@
+# /etc/shedos/screensaver.toml — default settings for shedos-screensaver.
+#
+# This file is backed up by pacman: edits survive package upgrades
+# (pacman writes the new packaged version to .pacnew if the maintainer
+# bumps it, leaving your version intact).
+#
+# CLI flags override these values. Per-style options under
+# [style.<name>] override the style's compiled-in defaults.
+
+[defaults]
+# Initial style. One of: logo-bounce, matrix, plasma, starfield,
+# conway, tunnel, waves, mandala.
+style = "logo-bounce"
+
+# Color override. Empty = use the style's default_color() (per-style).
+# Accepts: #rrggbb, r,g,b, named ANSI, or Catppuccin Mocha shorthand.
+color = ""
+
+# Frame budget. Drop to 15 on battery-constrained systems.
+fps = 30
+
+# Rotate styles every N seconds. 0 = disabled (stay on the chosen style).
+shuffle_seconds = 0
+
+# Render backend. "auto" picks tty when invoked from an interactive
+# terminal, wayland otherwise.
+mode = "auto"
+
+# Audio reactivity. "desktop" captures system audio (requires a
+# *.monitor input device — see /usr/share/doc/shedos-screensaver/
+# audio-setup.md). "mic" captures from the default microphone.
+# "none" disables audio reactivity.
+audio_source = "none"
+
+# Wayland-mode wallpaper backdrop. "auto" tries
+# ~/.config/hypr/wallpaper.png, "none" disables, or pass an absolute path.
+wallpaper = "auto"
+
+# Brightness multiplier on the wallpaper backdrop (0.0 = black,
+# 1.0 = full brightness). 0.3 keeps the foreground animation legible.
+wallpaper_dim = 0.3
+
+# Locale override (BCP-47, e.g. en-US, fr-FR). Empty = inherit from
+# the environment ($LC_ALL → $LC_MESSAGES → $LANG → en-US).
+locale = ""
+
+# ---- per-style options ----
+# Each [style.<name>] section's keys mirror `shedman screensaver
+# --help-style <name>`. Unknown keys are rejected at parse time;
+# values are validated against the same schema the CLI uses.
+
+[style.matrix]
+density = 0.5
+trail_length = 20
+glyphs = "katakana"
+
+[style.conway]
+rule = "B3/S23"
+reseed_interval = 30
+
+[style.plasma]
+freq_x = 1.0
+freq_y = 1.5
+
+[style.starfield]
+count = 200
+warp_factor = 5.0
+
+[style.logo-bounce]
+speed = 1.0
+color_cycle = true
+
+[style.tunnel]
+rings = 20
+speed = 1.0
+
+[style.waves]
+wavelength_x = 1.0
+wavelength_y = 1.5
+speed = 1.0
+
+[style.mandala]
+symmetry = 8
+growth = 1.0

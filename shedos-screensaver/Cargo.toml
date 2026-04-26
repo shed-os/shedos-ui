@@ -5,6 +5,8 @@ members = [
     "crates/shedos-screensaver-i18n",
     "crates/shedos-screensaver-styles",
     "crates/shedos-screensaver-tty",
+    "crates/shedos-screensaver-wayland",
+    "crates/shedos-screensaver-audio",
     "crates/shedos-screensaver-cli",
 ]
 
@@ -32,11 +34,20 @@ rand = "0.8"
 rand_chacha = "0.3"
 signal-hook = "0.3"
 insta = "1"
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+fontdue = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+cpal = "0.15"
+realfft = "3"
+libc = "0.2"
 
 shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
 shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
 shedos-screensaver-styles = { path = "crates/shedos-screensaver-styles" }
 shedos-screensaver-tty = { path = "crates/shedos-screensaver-tty" }
+shedos-screensaver-wayland = { path = "crates/shedos-screensaver-wayland" }
+shedos-screensaver-audio = { path = "crates/shedos-screensaver-audio" }
 
 [profile.release]
 lto = "thin"
