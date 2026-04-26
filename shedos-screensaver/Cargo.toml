@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shedos-screensaver-core",
+    "crates/shedos-screensaver-i18n",
+    "crates/shedos-screensaver-cli",
+]
+
+[workspace.package]
+# Internal cargo crate version — kept as semver because cargo rejects
+# leading zeros (the CalVer "2026.04.25" used by the PKGBUILD trips
+# its parser on "04"). Bumped only on internal API changes; the user-
+# facing version comes from the PKGBUILD pkgver and is what pacman
+# reports.
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/theshedman/shedos"
+authors = ["ShedOS"]
+rust-version = "1.75"
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.5"
+fluent = "0.16"
+fluent-bundle = "0.15"
+unic-langid = { version = "0.9", features = ["macros"] }
+
+shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
+shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+debug = "limited"

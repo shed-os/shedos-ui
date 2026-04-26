@@ -1,0 +1,19 @@
+[package]
+name = "shedos-screensaver-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "CLI binary for shedos-screensaver"
+
+[[bin]]
+name = "shedos-screensaver"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+clap_complete.workspace = true
+shedos-screensaver-core.workspace = true
+shedos-screensaver-i18n.workspace = true

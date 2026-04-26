@@ -1,0 +1,10 @@
+#!/bin/bash
+# Thin shim — `shedman` autodiscovers /usr/libexec/shedman/* as
+# subcommands; the actual binary lives at /usr/bin/shedos-screensaver
+# so users can also invoke it directly (e.g. via systemd-run from
+# hypridle, or from i3/sway sessions where shedman isn't installed).
+#
+# `exec` so the parent shedman dispatcher's argv-preserve flow works
+# correctly (signals, exit code, no extra fork).
+
+exec /usr/bin/shedos-screensaver "$@"
