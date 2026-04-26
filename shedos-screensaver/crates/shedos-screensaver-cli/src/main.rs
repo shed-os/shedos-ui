@@ -197,12 +197,10 @@ fn main() -> ExitCode {
         }
     }
 
-    let logo = Logo::load_default().unwrap_or_else(|_| {
-        Logo::parse(
-            "███████\n█     █\n███████\n",
-            std::path::PathBuf::from("fallback"),
-        )
-    });
+    // Always returns the real SHEDOS art: tries /etc/shedos-ascii.txt first
+    // (so shedos-branding live-updates are picked up), falls back to the
+    // compile-time embedded copy if the file is missing.
+    let logo = Logo::load_default();
 
     // Audio capture (live, or unconfigured).
     let audio = match cli.audio_source {

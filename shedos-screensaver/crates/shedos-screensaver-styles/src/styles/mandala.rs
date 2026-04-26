@@ -31,7 +31,12 @@ fn validate_growth(v: &OptVal) -> Result<(), String> {
     validate_f32_range(0.1, 10.0)(v)
 }
 
-const KERNEL_GLYPHS: &[char] = &['▘', '▝', '▖', '▗', '▚', '▞', '▙', '▟', '◆', '●', '◇', '○'];
+/// Kernel glyphs are sampled at runtime from the SHEDOS logo's lit
+/// cells (so the kaleidoscope is literally built from the brand
+/// letters), with a small fallback set for the (rare) case where
+/// the logo is empty — e.g. a pathological /etc/shedos-ascii.txt
+/// override that's all whitespace.
+const FALLBACK_KERNEL_GLYPHS: &[char] = &['█', '▓', '▒', '░'];
 
 pub struct Mandala;
 
@@ -63,6 +68,24 @@ impl Style for Mandala {
         let aspect = 0.5;
         let max_radius = (cx.min(cy / aspect)) * 0.95;
 
+        // Kernel glyphs from the SHEDOS logo's lit cells: collect every
+        // unique non-whitespace character, fall back to a small tile set
+        // if the logo is empty.
+        let mut kernel: Vec<char> = ctx
+            .logo
+            .glyphs
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        kernel.dedup();
+        let kernel_glyphs: &[char] = if kernel.is_empty() {
+            FALLBACK_KERNEL_GLYPHS
+        } else {
+            &kernel
+        };
+
         // Generate a few "seed" points in a wedge of angle 2π/N; replicate
         // around the full circle by rotation.
         let seeds: usize = 14;
@@ -72,7 +95,7 @@ impl Style for Mandala {
             // Pulsing radial position.
             let radius = max_radius * (f + 0.15 * (t + i as f32 * 0.3).sin());
             let angle_in_wedge = wedge * (0.15 + 0.7 * (t * 0.4 + i as f32 * 0.5).cos().abs());
-            let glyph = KERNEL_GLYPHS[i % KERNEL_GLYPHS.len()];
+            let glyph = kernel_glyphs[i % kernel_glyphs.len()];
             let intensity = 0.5 + 0.5 * (t + i as f32).sin();
             let base = ctx.color;
             let fg = Color::rgb(
@@ -97,5 +120,10 @@ impl Style for Mandala {
                 });
             }
         }
+
+        // SHEDOS logo at center, drawn last so the kaleidoscope
+        // radiates around it. Pulses gently with t.
+        let pulse = 0.7 + 0.3 * (t * 0.5).sin();
+        crate::styles::plasma::overlay_logo_centered(frame, ctx.logo, pulse, t);
     }
 }

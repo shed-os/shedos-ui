@@ -3,7 +3,7 @@
 
 use crate::opts::{validate_f32_range, OptType, OptVal, OptionDoc, OptionSchema};
 use crate::{Ctx, Style};
-use shedos_screensaver_core::{Cell, Color, Frame};
+use shedos_screensaver_core::{Cell, Color, Frame, Logo};
 
 static SCHEMA: OptionSchema = OptionSchema {
     options: &[
@@ -71,8 +71,6 @@ impl Style for Plasma {
                     + ((x * 0.5 + y * 0.5) + t * 0.3).sin();
                 let n = (v + 3.0) / 6.0; // normalize 0..1
                 let (gr, gg, gb) = plasma_color(n, ctx.color);
-                // Use a half-block to stack two colors per cell vertically;
-                // simpler: just fill with full block for the foreground color.
                 frame.set(r, c, Cell {
                     ch: '█',
                     fg: Color::rgb(gr, gg, gb),
@@ -80,6 +78,48 @@ impl Style for Plasma {
                     attrs: Default::default(),
                 });
             }
+        }
+
+        // SHEDOS logo overlaid in the center, white-on-transparent so
+        // the plasma still bleeds through behind it. The logo "breathes"
+        // gently with t.
+        let pulse = 0.7 + 0.3 * (t * 0.6).sin();
+        overlay_logo_centered(frame, ctx.logo, pulse, t);
+    }
+}
+
+/// Render the SHEDOS art centered horizontally + vertically on the
+/// frame, overwriting the background pattern. `pulse` (0..1) scales
+/// the brightness of the overlay so styles can make it breathe with
+/// the animation. Used by plasma, waves, and any other "abstract
+/// background" style that wants the brand mark prominent.
+pub(crate) fn overlay_logo_centered(frame: &mut Frame, logo: &Logo, pulse: f32, _t: f32) {
+    if logo.rows == 0 || logo.cols == 0 {
+        return;
+    }
+    let row_offset = (frame.rows().saturating_sub(logo.rows) / 2) as i32;
+    let col_offset = (frame.cols().saturating_sub(logo.cols) / 2) as i32;
+    let pulse = pulse.clamp(0.0, 1.0);
+    let r_ch = (255.0 * pulse) as u8;
+    let g_ch = (255.0 * pulse) as u8;
+    let b_ch = (255.0 * pulse) as u8;
+    let fg = Color::rgb(r_ch, g_ch, b_ch);
+    for lr in 0..logo.rows as i32 {
+        for lc in 0..logo.cols as i32 {
+            if !logo.lit(lr as usize, lc as usize) {
+                continue;
+            }
+            let fr = row_offset + lr;
+            let fc = col_offset + lc;
+            if fr < 0 || fc < 0 || fr >= frame.rows() as i32 || fc >= frame.cols() as i32 {
+                continue;
+            }
+            frame.set(fr as u16, fc as u16, Cell {
+                ch: logo.glyph_at(lr as usize, lc as usize),
+                fg,
+                bg: Color::BASE,
+                attrs: Default::default(),
+            });
         }
     }
 }

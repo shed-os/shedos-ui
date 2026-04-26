@@ -90,6 +90,12 @@ impl Style for Matrix {
         let cols = frame.cols() as usize;
         let rows = frame.rows() as i32;
 
+        // SHEDOS logo overlaid centered, faded so the rain still
+        // partially shows through the gaps between letters. Drawn
+        // FIRST so trail spawns can overdraw it (the rain "passes
+        // in front" of the logo).
+        crate::styles::plasma::overlay_logo_centered(frame, ctx.logo, 0.55, ctx.t.as_secs_f32());
+
         if self.trails.len() != cols {
             self.trails.clear();
             self.trails.resize(cols, None);

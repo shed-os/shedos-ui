@@ -100,5 +100,11 @@ impl Style for Waves {
                 });
             }
         }
+
+        // SHEDOS logo riding the wave: brightness oscillates with the
+        // average wave at the logo's rows, so it looks like the logo
+        // is part of the lattice rather than glued on top.
+        let avg_intensity = 0.5 + 0.5 * (t * 0.7).sin();
+        crate::styles::plasma::overlay_logo_centered(frame, ctx.logo, avg_intensity, t);
     }
 }

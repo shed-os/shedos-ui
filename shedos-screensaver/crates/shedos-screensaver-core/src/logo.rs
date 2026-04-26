@@ -4,6 +4,16 @@ use std::path::{Path, PathBuf};
 /// Where shedos-branding installs the canonical SHEDOS art.
 pub const DEFAULT_LOGO_PATH: &str = "/etc/shedos-ascii.txt";
 
+/// Compile-time copy of the canonical SHEDOS art. Pulled directly
+/// from the shedos-branding tree so the screensaver crate can never
+/// fall out of sync with what fastfetch and other consumers see.
+/// `Logo::load_default()` falls back to this when the runtime path
+/// is missing (e.g. running the binary on a dev box without
+/// shedos-branding installed) — there is no scenario in which a
+/// shedos-screensaver invocation lacks the real SHEDOS art.
+pub const EMBEDDED_SHEDOS_ART: &str =
+    include_str!("../../../../shedos-branding/tree/etc/shedos-ascii.txt");
+
 /// The SHEDOS ASCII art, parsed into a row-major grid of cells +
 /// a derived binary mask (true = lit cell, false = blank).
 ///
@@ -21,8 +31,21 @@ pub struct Logo {
 }
 
 impl Logo {
-    pub fn load_default() -> Result<Self, LogoLoadError> {
-        Self::load(Path::new(DEFAULT_LOGO_PATH))
+    /// Load the canonical SHEDOS art. Tries `/etc/shedos-ascii.txt`
+    /// first (so a shedos-branding update is picked up live without
+    /// rebuilding the screensaver), falls back to the compile-time
+    /// embedded copy. Never fails.
+    pub fn load_default() -> Self {
+        match Self::load(Path::new(DEFAULT_LOGO_PATH)) {
+            Ok(l) => l,
+            Err(_) => Self::embedded(),
+        }
+    }
+
+    /// Compile-time embedded SHEDOS art, used as the fallback when
+    /// `/etc/shedos-ascii.txt` is missing.
+    pub fn embedded() -> Self {
+        Self::parse(EMBEDDED_SHEDOS_ART, PathBuf::from("<embedded>"))
     }
 
     pub fn load(path: &Path) -> Result<Self, LogoLoadError> {
@@ -151,5 +174,28 @@ mod tests {
     fn load_missing_file_errors() {
         let err = Logo::load(Path::new("/this/path/does/not/exist/shedos.txt")).unwrap_err();
         let LogoLoadError::Read { .. } = err;
+    }
+
+    #[test]
+    fn embedded_logo_has_real_shedos_dimensions() {
+        // The packaged shedos-ascii.txt is 5 rows of block-letter
+        // SHEDOS, ≥45 cols wide. Anything smaller means the
+        // include_str! is pointing at the wrong file (e.g. an
+        // accidentally-checked-in placeholder).
+        let l = Logo::embedded();
+        assert_eq!(l.rows, 5, "embedded logo should be 5 rows; got {}", l.rows);
+        assert!(l.cols >= 45, "embedded logo should be ≥45 cols; got {}", l.cols);
+        assert!(l.lit_count() > 100, "embedded logo should have >100 lit cells; got {}", l.lit_count());
+    }
+
+    #[test]
+    fn load_default_falls_back_to_embedded() {
+        // Even on a dev box without shedos-branding installed, this
+        // returns the real SHEDOS art rather than panicking or
+        // returning a placeholder.
+        let l = Logo::load_default();
+        assert!(l.rows > 0);
+        assert!(l.cols > 0);
+        assert!(l.lit_count() > 0);
     }
 }
