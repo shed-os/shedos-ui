@@ -1,25 +1,28 @@
 //! matrix-rain — green Matrix-style rain falls everywhere across
-//! the canvas; once trails reach a target cell's row, they "freeze"
-//! into that cell with the target's glyph and color. By the end,
-//! every target cell has been frozen and the result is the SHEDOS
-//! art with a Matrix afterglow.
+//! the canvas. As each column's trail head sweeps down, any SHEDOS
+//! target cell whose row the head has reached "freezes" out of the
+//! rain into its final glyph and color. Letters crystallize as the
+//! rain washes over them; once every target cell is frozen the rain
+//! stops and the resolved SHEDOS sits solid.
 
 use crate::{AudioFrame, Cell, Color, Effect, EffectCtx, Frame};
 use shedos_screensaver_core::CellAttrs;
 use rand::Rng;
+use rand::SeedableRng;
 use std::time::Duration;
 
 const DURATION_MS: u64 = 6_500;
+/// Hard fallback: any straggler target cell freezes by this progress
+/// even if no trail has swept it. Keeps the resolved frame complete.
+const FORCE_FREEZE_AT: f32 = 0.95;
 const KATAKANA: &str = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
 
 #[derive(Clone, Copy)]
 struct TargetCell {
     row: u16,
-    col: u16,
     ch: char,
     color: Color,
-    /// 0..1 progress at which this cell freezes to the target.
-    freeze_at: f32,
+    frozen: bool,
 }
 
 struct Trail {
@@ -31,7 +34,9 @@ struct Trail {
 }
 
 pub struct MatrixRain {
-    target_cells: Vec<TargetCell>,
+    /// Target cells grouped by column so each trail-head sweep only
+    /// walks its own column's cells.
+    target_by_col: Vec<Vec<TargetCell>>,
     trails_per_col: Vec<Option<Trail>>,
     elapsed: Duration,
     rows: u16,
@@ -42,7 +47,7 @@ pub struct MatrixRain {
 impl MatrixRain {
     pub fn new() -> Self {
         Self {
-            target_cells: Vec::new(),
+            target_by_col: Vec::new(),
             trails_per_col: Vec::new(),
             elapsed: Duration::ZERO,
             rows: 0,
@@ -62,39 +67,30 @@ impl Effect for MatrixRain {
     fn name(&self) -> &'static str { "matrix-rain" }
     fn title(&self) -> &'static str { "Matrix Rain" }
     fn description(&self) -> &'static str {
-        "Green katakana rain falls across the canvas; trails freeze into the target cells one by one."
+        "Green katakana rain falls; letters crystallize out of the rain as each trail sweeps over them."
     }
     fn duration(&self) -> Duration { Duration::from_millis(DURATION_MS) }
     fn reactive(&self) -> bool { true }
 
     fn setup(&mut self, target: &Frame, ctx: &mut EffectCtx<'_>) {
-        self.target_cells.clear();
         self.elapsed = Duration::ZERO;
         self.rows = target.rows();
         self.cols = target.cols();
+        self.target_by_col = (0..self.cols as usize).map(|_| Vec::new()).collect();
         self.trails_per_col = (0..self.cols as usize).map(|_| None).collect();
 
-        let mut lit: Vec<(u16, u16, char, Color)> = target
-            .cells()
-            .filter_map(|(r, c, cell)| {
-                if cell.ch != ' ' {
-                    Some((r, c, cell.ch, cell.fg))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // Stagger freeze times by column-then-row for a "filling" feel.
-        lit.sort_by_key(|&(r, c, _, _)| c as u32 * 100 + r as u32);
-        let total = lit.len().max(1) as f32;
-        for (i, (r, c, ch, color)) in lit.into_iter().enumerate() {
-            self.target_cells.push(TargetCell {
-                row: r,
-                col: c,
-                ch,
-                color,
-                freeze_at: 0.4 + 0.55 * (i as f32 / total),
-            });
+        for (r, c, cell) in target.cells() {
+            if cell.ch != ' ' {
+                self.target_by_col[c as usize].push(TargetCell {
+                    row: r,
+                    ch: cell.ch,
+                    color: cell.fg,
+                    frozen: false,
+                });
+            }
+        }
+        for col_cells in &mut self.target_by_col {
+            col_cells.sort_by_key(|c| c.row);
         }
 
         // Pre-populate every column with a trail so there's no awkward
@@ -118,64 +114,98 @@ impl Effect for MatrixRain {
 
         frame.clear();
 
-        // Step trails. In the last 5 % suppress the rain entirely so
-        // the resolved SHEDOS sits solid with no katakana residue
-        // around the letters.
-        let suppress_rain = progress >= 0.95;
+        // 1. Advance trails; the head sweeps target cells frozen.
         for col in 0..self.cols as usize {
-            if suppress_rain {
-                self.trails_per_col[col] = None;
-                continue;
-            }
             if let Some(trail) = self.trails_per_col[col].as_mut() {
                 trail.head += trail.speed * dt_s;
                 let head_r = trail.head as i32;
+
+                for cell in &mut self.target_by_col[col] {
+                    if !cell.frozen && (cell.row as i32) <= head_r {
+                        cell.frozen = true;
+                    }
+                }
+
+                // Recycle the trail when the whole tail has run off
+                // the bottom. After 85 % progress, retire instead of
+                // recycling so the canvas can empty out cleanly.
                 if head_r - trail.length > self.rows as i32 {
-                    // Respawn (or stop if we're past 85 % — let frozen cells dominate).
                     if progress < 0.85 {
                         trail.head = -(frame_rng.gen_range(0..self.rows as i32) as f32) * 0.5;
                         trail.speed = frame_rng.gen_range(8.0..22.0);
                         trail.length = frame_rng.gen_range(8..18);
                     } else {
                         self.trails_per_col[col] = None;
-                        continue;
                     }
-                }
-                for k in 0..trail.length {
-                    let r = head_r - k;
-                    if !(0..self.rows as i32).contains(&r) {
-                        continue;
-                    }
-                    let intensity = 1.0 - (k as f32 / trail.length as f32);
-                    let g = self.glyph_chars[(frame_rng.gen::<usize>()) % self.glyph_chars.len()];
-                    let (fg, attrs) = if k == 0 {
-                        (Color::rgb(0xff, 0xff, 0xff), CellAttrs::BOLD)
-                    } else {
-                        let r_ch = (0x33_u8 as f32 * intensity) as u8;
-                        let g_ch = (0xff_u8 as f32 * intensity) as u8;
-                        let b_ch = (0x77_u8 as f32 * intensity) as u8;
-                        (Color::rgb(r_ch, g_ch, b_ch), CellAttrs::NONE)
-                    };
-                    frame.set(r as u16, col as u16, Cell {
-                        ch: g,
-                        fg,
-                        bg: Color::BASE,
-                        attrs,
-                    });
                 }
             }
         }
 
-        // Overwrite frozen target cells. Iterate after trails so frozen
-        // cells always win.
-        for c in &self.target_cells {
-            if progress >= c.freeze_at {
-                frame.set(c.row, c.col, Cell {
-                    ch: c.ch,
-                    fg: c.color,
-                    bg: Color::BASE,
-                    attrs: Default::default(),
-                });
+        // 2. Hard fallback at 95 % so the resolved SHEDOS is always
+        // complete by progress=1.0 even if any column lost its trail
+        // before sweeping its lowest target row.
+        if progress >= FORCE_FREEZE_AT {
+            for col_cells in &mut self.target_by_col {
+                for cell in col_cells {
+                    cell.frozen = true;
+                }
+            }
+        }
+
+        // 3. Suppress rain once every cell is frozen (or at the 95 %
+        // cutoff). Drop trails so they don't reappear next frame.
+        let all_frozen = self
+            .target_by_col
+            .iter()
+            .all(|col| col.iter().all(|c| c.frozen));
+        let suppress_rain = all_frozen || progress >= FORCE_FREEZE_AT;
+
+        if suppress_rain {
+            for t in &mut self.trails_per_col {
+                *t = None;
+            }
+        } else {
+            for col in 0..self.cols as usize {
+                if let Some(trail) = self.trails_per_col[col].as_ref() {
+                    let head_r = trail.head as i32;
+                    for k in 0..trail.length {
+                        let r = head_r - k;
+                        if !(0..self.rows as i32).contains(&r) {
+                            continue;
+                        }
+                        let intensity = 1.0 - (k as f32 / trail.length as f32);
+                        let g = self.glyph_chars[(frame_rng.gen::<usize>()) % self.glyph_chars.len()];
+                        let (fg, attrs) = if k == 0 {
+                            (Color::rgb(0xff, 0xff, 0xff), CellAttrs::BOLD)
+                        } else {
+                            let r_ch = (0x33_u8 as f32 * intensity) as u8;
+                            let g_ch = (0xff_u8 as f32 * intensity) as u8;
+                            let b_ch = (0x77_u8 as f32 * intensity) as u8;
+                            (Color::rgb(r_ch, g_ch, b_ch), CellAttrs::NONE)
+                        };
+                        frame.set(r as u16, col as u16, Cell {
+                            ch: g,
+                            fg,
+                            bg: Color::BASE,
+                            attrs,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 4. Overlay frozen target cells last so they always win
+        // against any trail residue landing on the same cell.
+        for (col_idx, col_cells) in self.target_by_col.iter().enumerate() {
+            for cell in col_cells {
+                if cell.frozen {
+                    frame.set(cell.row, col_idx as u16, Cell {
+                        ch: cell.ch,
+                        fg: cell.color,
+                        bg: Color::BASE,
+                        attrs: Default::default(),
+                    });
+                }
             }
         }
 
@@ -187,10 +217,13 @@ impl Effect for MatrixRain {
         for t in &mut self.trails_per_col {
             *t = None;
         }
+        for col_cells in &mut self.target_by_col {
+            for cell in col_cells {
+                cell.frozen = false;
+            }
+        }
     }
 }
-
-use rand::SeedableRng;
 
 fn seed_from_u64(seed: u64) -> [u8; 32] {
     let mut out = [0u8; 32];
