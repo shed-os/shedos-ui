@@ -230,9 +230,9 @@ for descriptions.
 # HYPRIDLE INTEGRATION
 
 On fresh installs, /etc/skel/.config/hypr/hypridle.conf includes
-a listener that fires *shedos-screensaver --mode=wayland
---idle-daemon* 60 s before lock, with an *on-resume* hook that
-sends SIGUSR1.
+a listener that fires
+*shedos-screensaver --mode=wayland --idle-daemon* 60 s before
+lock, with an *on-resume* hook that sends SIGUSR1.
 
 For users on existing accounts (where /etc/skel doesn't apply),
 copy the snippet from
