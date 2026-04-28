@@ -3,16 +3,8 @@
 # Animated screensaver subsystem (Rust). One binary,
 # /usr/bin/shedos-screensaver, with a TTY backend (crossterm) and a
 # Wayland-native fullscreen overlay backend (smithay-client-toolkit
-# + wgpu). Eight styles ship in the initial release; per-style
-# typed options; optional pipewire audio reactivity; wallpaper
-# compositing in Wayland mode; fluent-rs i18n.
-#
-# Stage 2 ships the workspace skeleton: shedos-screensaver-core
-# (Frame/Color/Clock/Logo/Catppuccin), shedos-screensaver-i18n
-# (fluent wrapper + en-US catalog), and the CLI binary stub
-# (--help/--list/--help-style/--complete-{bash,zsh,fish}/--version
-# plus full --style/--color/--style-opt validation).
-# Renderer crates and styles land in subsequent stages.
+# + wgpu). Per-style typed options; optional pipewire audio reactivity;
+# wallpaper compositing in Wayland mode; fluent-rs i18n.
 
 pkgname=shedos-screensaver
 pkgver=2026.04.27
@@ -66,28 +58,23 @@ check() {
 package() {
     cd "$startdir"
 
-    # Binary.
     install -Dm755 target/release/shedos-screensaver \
         "$pkgdir/usr/bin/shedos-screensaver"
 
-    # shedman dispatcher shim.
     install -Dm755 tree/usr/libexec/shedman/screensaver \
         "$pkgdir/usr/libexec/shedman/screensaver"
 
-    # Backed-up default config.
     install -Dm644 tree/etc/shedos/screensaver.toml \
         "$pkgdir/etc/shedos/screensaver.toml"
 
-    # Man page.
     install -Dm644 man/build/shedman-screensaver.1 \
         "$pkgdir/usr/share/man/man1/shedman-screensaver.1"
 
-    # i18n catalog (embedded fallback also baked into the binary,
-    # but ship the file so users can copy/translate it).
+    # i18n catalog. The embedded fallback is baked into the binary,
+    # but ship the file too so users can copy/translate it.
     install -Dm644 i18n/en-US.ftl \
         "$pkgdir/usr/share/locale/en/LC_MESSAGES/shedos-screensaver.ftl"
 
-    # Documentation.
     install -d "$pkgdir/usr/share/doc/shedos-screensaver"
     install -m644 tree/usr/share/doc/shedos-screensaver/hypridle-example.conf \
         "$pkgdir/usr/share/doc/shedos-screensaver/hypridle-example.conf"
