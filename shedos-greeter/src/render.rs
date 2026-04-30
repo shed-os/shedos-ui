@@ -118,12 +118,14 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
         window,
         pool,
         wallpaper,
+        wallpaper_cache: None,
         regular,
         bold,
         keyboard: None,
         size: None,
         username,
         password: String::new(),
+        error_text: String::new(),
         error_until: None,
         exit: false,
     };
@@ -144,12 +146,23 @@ struct App {
     window: Window,
     pool: SlotPool,
     wallpaper: image::DynamicImage,
+    /// Lanczos-scaled wallpaper, pre-converted to wl_shm BGRA byte
+    /// order. Re-computed only when the surface size changes; on each
+    /// keystroke draw() just memcpy's this into the buffer. Without
+    /// this cache, every keystroke triggers a multi-hundred-ms Lanczos
+    /// resize of the source image and the input feels laggy.
+    wallpaper_cache: Option<(u32, u32, Vec<u8>)>,
     regular: FontFace,
     bold: FontFace,
     keyboard: Option<WlKeyboard>,
     size: Option<(u32, u32)>,
     username: Option<String>,
     password: String,
+    /// Error message to render below the input box during the
+    /// `error_until` hold window. Populated by `submit()` with the
+    /// actual greetd error (truncated) so PAM-side rejection reasons
+    /// surface without having to grep the journal.
+    error_text: String,
     error_until: Option<Instant>,
     exit: bool,
 }
@@ -173,7 +186,18 @@ impl App {
                 // self.password was cleared by mem::take above. Surface
                 // the failure to the user via a red-border + error text
                 // hold matching hyprlock's `fail_color`/`fail_timeout`.
+                // Show the actual greetd error message (truncated) so
+                // PAM rejection reasons are visible without grep-ing the
+                // journal — empty error chains fall back to a generic
+                // string.
                 log::warn!("login failed: {:#}", e);
+                let msg = format!("{:#}", e);
+                let trimmed: String = msg.chars().take(60).collect();
+                self.error_text = if trimmed.is_empty() {
+                    "Authentication Failed".to_string()
+                } else {
+                    trimmed
+                };
                 self.error_until = Some(Instant::now() + ERROR_HOLD);
             }
         }
@@ -208,17 +232,30 @@ impl App {
             .expect("create wl_shm buffer");
 
         // Wallpaper.
-        let scaled = self
-            .wallpaper
-            .resize_to_fill(w, h, FilterType::Lanczos3)
-            .to_rgba8();
-        for (i, px) in scaled.pixels().enumerate() {
-            let dst = i * 4;
-            canvas[dst] = px[2];
-            canvas[dst + 1] = px[1];
-            canvas[dst + 2] = px[0];
-            canvas[dst + 3] = 0xff;
+        // Wallpaper: pre-scaled BGRA bytes cached. Lanczos3 only on
+        // size change (typically once, at first configure). Subsequent
+        // redraws (one per keystroke) memcpy the cached buffer.
+        let cache_hit = self
+            .wallpaper_cache
+            .as_ref()
+            .is_some_and(|(cw, ch, _)| *cw == w && *ch == h);
+        if !cache_hit {
+            log::info!("rebuilding wallpaper cache for {}x{}", w, h);
+            let scaled = self
+                .wallpaper
+                .resize_to_fill(w, h, FilterType::Lanczos3)
+                .to_rgba8();
+            let mut bgra = Vec::with_capacity((w as usize) * (h as usize) * 4);
+            for px in scaled.pixels() {
+                bgra.push(px[2]);
+                bgra.push(px[1]);
+                bgra.push(px[0]);
+                bgra.push(0xff);
+            }
+            self.wallpaper_cache = Some((w, h, bgra));
         }
+        let cached_bgra = &self.wallpaper_cache.as_ref().expect("just populated").2;
+        canvas[..cached_bgra.len()].copy_from_slice(cached_bgra);
 
         let now = chrono::Local::now();
         let clock = now.format("%H:%M").to_string();
@@ -282,19 +319,15 @@ impl App {
         // error hold) or the "Hi, $username" greeting.
         let line_y = box_y + INPUT_H as i32 + 56;
         if error {
-            let err_w = self.regular.measure_width(ERROR_TEXT, GREET_PX);
+            let msg = if self.error_text.is_empty() {
+                ERROR_TEXT
+            } else {
+                self.error_text.as_str()
+            };
+            let err_w = self.regular.measure_width(msg, GREET_PX);
             let err_x = (w as i32 - err_w) / 2;
-            self.regular.render(
-                ERROR_TEXT,
-                GREET_PX,
-                err_x,
-                line_y,
-                RED,
-                0xff,
-                canvas,
-                w,
-                h,
-            );
+            self.regular
+                .render(msg, GREET_PX, err_x, line_y, RED, 0xff, canvas, w, h);
         } else {
             let greet = match &self.username {
                 Some(name) => format!("Hi, {}", name),
