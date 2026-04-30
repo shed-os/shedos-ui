@@ -41,6 +41,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
+use crate::greetd;
 use crate::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
 use crate::user;
 
@@ -146,13 +147,25 @@ struct App {
 
 impl App {
     fn submit(&mut self) {
-        // Commit 5 wires this to greetd_ipc; for now we just log and clear.
-        log::info!(
-            "submit: user={:?} password_len={}",
-            self.username,
-            self.password.len()
-        );
-        self.password.clear();
+        let Some(username) = self.username.clone() else {
+            log::warn!("submit: no username configured (set /etc/shedos/login-user)");
+            self.password.clear();
+            return;
+        };
+        let password = std::mem::take(&mut self.password);
+        match greetd::Auth::connect()
+            .and_then(|mut a| a.login(&username, &password, vec!["Hyprland".into()]))
+        {
+            Ok(()) => {
+                log::info!("auth + start_session OK; greeter exiting for {}", username);
+                self.exit = true;
+            }
+            Err(e) => {
+                // Caller cleared self.password via mem::take; commit 6 will
+                // add a shake animation here. For now just log and re-prompt.
+                log::warn!("login failed: {:#}", e);
+            }
+        }
     }
 
     fn draw(&mut self) {

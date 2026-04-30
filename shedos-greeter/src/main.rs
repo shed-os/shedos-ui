@@ -2,6 +2,7 @@
 // Hands off to the Wayland render module; subsequent commits add the
 // password input, greetd IPC, clock + branding text, and theme loading.
 
+mod greetd;
 mod render;
 mod text;
 mod user;
