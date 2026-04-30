@@ -18,8 +18,8 @@ use anyhow::{Context, Result};
 use image::imageops::FilterType;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_registry,
-    delegate_seat, delegate_shm,
+    delegate_compositor, delegate_keyboard, delegate_output, delegate_registry, delegate_seat,
+    delegate_shm, delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -28,9 +28,9 @@ use smithay_client_toolkit::{
         Capability, SeatHandler, SeatState,
     },
     shell::{
-        wlr_layer::{
-            Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
-            LayerSurfaceConfigure,
+        xdg::{
+            window::{Window, WindowConfigure, WindowDecorations, WindowHandler},
+            XdgShell,
         },
         WaylandSurface,
     },
@@ -86,22 +86,24 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
     let seat_state = SeatState::new(&globals, &qh);
     let compositor =
         CompositorState::bind(&globals, &qh).context("wl_compositor not advertised")?;
-    let layer_shell = LayerShell::bind(&globals, &qh)
-        .context("zwlr_layer_shell_v1 not advertised by compositor")?;
+    let xdg_shell = XdgShell::bind(&globals, &qh)
+        .context("xdg_wm_base not advertised by compositor")?;
     let shm = Shm::bind(&globals, &qh).context("wl_shm not advertised")?;
 
+    // xdg-shell instead of wlr-layer-shell because the kiosk hosting
+    // compositors we target (cage) advertise xdg_wm_base but not
+    // zwlr_layer_shell_v1. cage forces single-window-fullscreen at the
+    // toplevel level, so we get the same "fullscreen greeter" UX as
+    // layer-shell + Anchor::all without the protocol mismatch.
     let surface = compositor.create_surface(&qh);
-    let layer = layer_shell.create_layer_surface(
-        &qh,
-        surface,
-        Layer::Top,
-        Some("shedos-greeter"),
-        None,
-    );
-    layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-    layer.set_exclusive_zone(-1);
-    layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-    layer.commit();
+    let window = xdg_shell.create_window(surface, WindowDecorations::ServerDefault, &qh);
+    window.set_title("ShedOS Greeter".to_string());
+    window.set_app_id("shedos-greeter".to_string());
+    // Hint at fullscreen so the compositor sends a configure with the
+    // output's full size; cage ignores this (always fullscreens its only
+    // window), and Hyprland-as-greeter can pair it with a windowrule.
+    window.set_fullscreen(None);
+    window.commit();
 
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
     let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
@@ -113,7 +115,7 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
         output_state,
         seat_state,
         shm,
-        layer,
+        window,
         pool,
         wallpaper,
         regular,
@@ -139,7 +141,7 @@ struct App {
     output_state: OutputState,
     seat_state: SeatState,
     shm: Shm,
-    layer: LayerSurface,
+    window: Window,
     pool: SlotPool,
     wallpaper: image::DynamicImage,
     regular: FontFace,
@@ -311,7 +313,7 @@ impl App {
         self.bold
             .render(brand, BRAND_PX, brand_x, brand_y, BLUE, 0x99, canvas, w, h);
 
-        let surface = self.layer.wl_surface();
+        let surface = self.window.wl_surface();
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
         surface.damage_buffer(0, 0, w as i32, h as i32);
         surface.commit();
@@ -453,9 +455,9 @@ fn draw_rounded_box(
     }
 }
 
-impl LayerShellHandler for App {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        log::info!("layer surface closed; exiting");
+impl WindowHandler for App {
+    fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _window: &Window) {
+        log::info!("xdg-toplevel close requested; exiting");
         self.exit = true;
     }
 
@@ -463,17 +465,15 @@ impl LayerShellHandler for App {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
-        configure: LayerSurfaceConfigure,
+        _window: &Window,
+        configure: WindowConfigure,
         _serial: u32,
     ) {
-        let (mut w, mut h) = configure.new_size;
-        if w == 0 {
-            w = 1920;
-        }
-        if h == 0 {
-            h = 1080;
-        }
+        // Compositors that want us to choose a size send None for both
+        // axes — fall back to 1080p so a misconfigured headless test
+        // still draws something.
+        let w = configure.new_size.0.map(|n| n.get()).unwrap_or(1920);
+        let h = configure.new_size.1.map(|n| n.get()).unwrap_or(1080);
         log::info!("configured at {}x{}", w, h);
         self.size = Some((w, h));
         self.draw();
@@ -642,8 +642,9 @@ impl ProvidesRegistryState for App {
 
 delegate_compositor!(App);
 delegate_keyboard!(App);
-delegate_layer!(App);
 delegate_output!(App);
 delegate_registry!(App);
 delegate_seat!(App);
 delegate_shm!(App);
+delegate_xdg_shell!(App);
+delegate_xdg_window!(App);
