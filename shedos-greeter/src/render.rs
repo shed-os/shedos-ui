@@ -12,6 +12,7 @@
 //! just logs and clears.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
@@ -46,10 +47,14 @@ use crate::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
 use crate::user;
 
 // Catppuccin Mocha tokens used by the greeter chrome. Hardcoded for
-// commit 4; the theme reconciler (commit 7) will feed these in.
+// commit 6; the theme reconciler (commit 7) will feed these in.
 const TEXT: (u8, u8, u8) = (0xcd, 0xd6, 0xf4);
 const BLUE: (u8, u8, u8) = (0x89, 0xb4, 0xfa);
 const BASE: (u8, u8, u8) = (0x1e, 0x1e, 0x2e);
+const RED: (u8, u8, u8) = (0xf3, 0x8b, 0xa8);
+
+const ERROR_HOLD: Duration = Duration::from_secs(2);
+const ERROR_TEXT: &str = "Authentication Failed";
 
 const CLOCK_PX: f32 = 120.0;
 const DATE_PX: f32 = 24.0;
@@ -117,6 +122,7 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
         size: None,
         username,
         password: String::new(),
+        error_until: None,
         exit: false,
     };
 
@@ -142,6 +148,7 @@ struct App {
     size: Option<(u32, u32)>,
     username: Option<String>,
     password: String,
+    error_until: Option<Instant>,
     exit: bool,
 }
 
@@ -161,18 +168,32 @@ impl App {
                 self.exit = true;
             }
             Err(e) => {
-                // Caller cleared self.password via mem::take; commit 6 will
-                // add a shake animation here. For now just log and re-prompt.
+                // self.password was cleared by mem::take above. Surface
+                // the failure to the user via a red-border + error text
+                // hold matching hyprlock's `fail_color`/`fail_timeout`.
                 log::warn!("login failed: {:#}", e);
+                self.error_until = Some(Instant::now() + ERROR_HOLD);
             }
         }
     }
+
 
     fn draw(&mut self) {
         let Some((w, h)) = self.size else { return };
         if w == 0 || h == 0 {
             return;
         }
+
+        // Resolve transient UI state before we acquire the wl_shm
+        // buffer borrow (which holds &mut self.pool until commit).
+        let error = match self.error_until {
+            Some(ts) if Instant::now() < ts => true,
+            Some(_) => {
+                self.error_until = None;
+                false
+            }
+            None => false,
+        };
 
         let stride = (w * 4) as i32;
         let total = (w as usize) * (h as usize) * 4;
@@ -217,11 +238,23 @@ impl App {
             .render(&date, DATE_PX, date_x, date_y, TEXT, 0xcc, canvas, w, h);
 
         // Password input box centered ~58% from top.
+        let border_color = if error { RED } else { BLUE };
         let box_x = (w as i32 - INPUT_W as i32) / 2;
         let box_y = (h as f32 * 0.58) as i32;
         draw_rounded_box(
-            canvas, w, h, box_x, box_y, INPUT_W, INPUT_H, INPUT_RADIUS, INPUT_BORDER, BASE,
-            0xe6, BLUE, 0xee,
+            canvas,
+            w,
+            h,
+            box_x,
+            box_y,
+            INPUT_W,
+            INPUT_H,
+            INPUT_RADIUS,
+            INPUT_BORDER,
+            BASE,
+            0xe6,
+            border_color,
+            0xee,
         );
         // Render password as bullet glyphs.
         let dots: String = "●".repeat(self.password.chars().count());
@@ -243,16 +276,33 @@ impl App {
             );
         }
 
-        // "Hi, $username" greeting just under the input box.
-        let greet = match &self.username {
-            Some(name) => format!("Hi, {}", name),
-            None => "Hi".to_string(),
-        };
-        let greet_w = self.regular.measure_width(&greet, GREET_PX);
-        let greet_x = (w as i32 - greet_w) / 2;
-        let greet_y = box_y + INPUT_H as i32 + 56;
-        self.regular
-            .render(&greet, GREET_PX, greet_x, greet_y, BLUE, 0xff, canvas, w, h);
+        // Below the input: either "Authentication Failed" (during the
+        // error hold) or the "Hi, $username" greeting.
+        let line_y = box_y + INPUT_H as i32 + 56;
+        if error {
+            let err_w = self.regular.measure_width(ERROR_TEXT, GREET_PX);
+            let err_x = (w as i32 - err_w) / 2;
+            self.regular.render(
+                ERROR_TEXT,
+                GREET_PX,
+                err_x,
+                line_y,
+                RED,
+                0xff,
+                canvas,
+                w,
+                h,
+            );
+        } else {
+            let greet = match &self.username {
+                Some(name) => format!("Hi, {}", name),
+                None => "Hi".to_string(),
+            };
+            let greet_w = self.regular.measure_width(&greet, GREET_PX);
+            let greet_x = (w as i32 - greet_w) / 2;
+            self.regular
+                .render(&greet, GREET_PX, greet_x, line_y, BLUE, 0xff, canvas, w, h);
+        }
 
         // Branding bottom center.
         let brand_w = self.bold.measure_width(brand, BRAND_PX);
