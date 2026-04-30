@@ -4,6 +4,7 @@
 
 mod render;
 mod text;
+mod user;
 
 use std::path::PathBuf;
 
