@@ -49,7 +49,7 @@ impl Default for WaylandConfig {
             font_path: None,
             cell_height_px: 18,
             wallpaper_path: None,
-            wallpaper_dim: 0.3,
+            wallpaper_dim: 0.5,
             fps_cap: 60,
         idle_daemon: false,
         }
