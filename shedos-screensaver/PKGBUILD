@@ -67,6 +67,13 @@ package() {
     install -Dm644 tree/etc/shedos/screensaver.toml \
         "$pkgdir/etc/shedos/screensaver.toml"
 
+    # User-level systemd unit. Started/stopped on demand by hypridle's
+    # listener hooks (no [Install] in the unit, so it's not auto-enabled
+    # at session start). The unit replaces the previous systemd-run +
+    # pkill string-matched lifecycle.
+    install -Dm644 tree/usr/lib/systemd/user/shedos-screensaver.service \
+        "$pkgdir/usr/lib/systemd/user/shedos-screensaver.service"
+
     install -Dm644 man/build/shedman-screensaver.1 \
         "$pkgdir/usr/share/man/man1/shedman-screensaver.1"
 
