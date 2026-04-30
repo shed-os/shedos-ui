@@ -3,6 +3,7 @@
 // password input, greetd IPC, clock + branding text, and theme loading.
 
 mod render;
+mod text;
 
 use std::path::PathBuf;
 

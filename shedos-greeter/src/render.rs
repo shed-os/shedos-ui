@@ -35,6 +35,17 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
+use crate::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
+
+// Catppuccin Mocha tokens used by the greeter chrome. Hardcoded for
+// commit 3; the theme reconciler (commit 7) will feed these in.
+const TEXT: (u8, u8, u8) = (0xcd, 0xd6, 0xf4);
+const BLUE: (u8, u8, u8) = (0x89, 0xb4, 0xfa);
+
+const CLOCK_PX: f32 = 120.0;
+const DATE_PX: f32 = 24.0;
+const BRAND_PX: f32 = 18.0;
+
 pub fn run(wallpaper_path: &Path) -> Result<()> {
     log::info!("loading wallpaper from {}", wallpaper_path.display());
     let wallpaper = image::open(wallpaper_path)
@@ -71,6 +82,9 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
     // Provisional pool; resized on the first configure once we know the surface size.
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
 
+    let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
+    let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
+
     let mut app = App {
         registry_state,
         output_state,
@@ -78,6 +92,8 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
         layer,
         pool,
         wallpaper,
+        regular,
+        bold,
         size: None,
         exit: false,
     };
@@ -97,6 +113,8 @@ struct App {
     layer: LayerSurface,
     pool: SlotPool,
     wallpaper: image::DynamicImage,
+    regular: FontFace,
+    bold: FontFace,
     size: Option<(u32, u32)>,
     exit: bool,
 }
@@ -131,6 +149,33 @@ impl App {
             canvas[dst + 2] = px[0];
             canvas[dst + 3] = 0xff;
         }
+
+        // Layer hyprlock-style chrome on top of the wallpaper.
+        // Vertical positions are percentage-based so the layout adapts
+        // to any resolution; font sizes are absolute px to mirror
+        // hyprlock's exact sizing.
+        let now = chrono::Local::now();
+        let clock = now.format("%H:%M").to_string();
+        let date = now.format("%A, %B %-d").to_string();
+        let brand = "ShedOS";
+
+        let clock_w = self.regular.measure_width(&clock, CLOCK_PX);
+        let clock_x = (w as i32 - clock_w) / 2;
+        let clock_y = (h as f32 * 0.30) as i32;
+        self.regular
+            .render(&clock, CLOCK_PX, clock_x, clock_y, TEXT, 0xff, canvas, w, h);
+
+        let date_w = self.regular.measure_width(&date, DATE_PX);
+        let date_x = (w as i32 - date_w) / 2;
+        let date_y = clock_y + (CLOCK_PX as i32 / 4);
+        self.regular
+            .render(&date, DATE_PX, date_x, date_y, TEXT, 0xcc, canvas, w, h);
+
+        let brand_w = self.bold.measure_width(brand, BRAND_PX);
+        let brand_x = (w as i32 - brand_w) / 2;
+        let brand_y = (h as f32 * 0.93) as i32;
+        self.bold
+            .render(brand, BRAND_PX, brand_x, brand_y, BLUE, 0x99, canvas, w, h);
 
         let surface = self.layer.wl_surface();
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
