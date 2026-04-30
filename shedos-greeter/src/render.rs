@@ -175,9 +175,25 @@ impl App {
             return;
         };
         let password = std::mem::take(&mut self.password);
-        match greetd::Auth::connect()
-            .and_then(|mut a| a.login(&username, &password, vec!["Hyprland".into()]))
-        {
+        // Launch via uwsm (Universal Wayland Session Manager) instead of
+        // bare Hyprland. uwsm wraps the compositor in proper systemd
+        // units, activates graphical-session.target, binds login
+        // session ↔ graphical-session bidirectionally, and keeps the
+        // session intact across systemctl suspend/resume cycles —
+        // exactly the bug class that caused our earlier "session
+        // terminates every ~12 minutes after first idle" symptom.
+        //
+        // The shell wrapper additionally `clear`s tty1 in the brief
+        // window between cage releasing the framebuffer and Hyprland
+        // claiming it, so console scrollback (boot messages, pam_motd
+        // output) doesn't flash visibly. `exec` replaces the shell so
+        // greetd's PID tracking stays clean.
+        let cmd = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "clear 2>/dev/null; exec uwsm start hyprland.desktop".to_string(),
+        ];
+        match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
                 log::info!("auth + start_session OK; greeter exiting for {}", username);
                 self.exit = true;
