@@ -1,0 +1,21 @@
+[package]
+name = "shedos-greeter"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "ShedOS greetd greeter — hyprlock-styled login screen"
+repository = "https://github.com/theshedman/shedos"
+publish = false
+
+[[bin]]
+name = "shedos-greeter"
+path = "src/main.rs"
+
+[dependencies]
+# Deps land per-commit as the Wayland surface, greetd IPC, and rendering
+# pipeline come online. Scaffold ships with none so `cargo build` is fast.
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
