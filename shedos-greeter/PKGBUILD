@@ -1,0 +1,61 @@
+# Maintainer: ShedOS <https://github.com/theshedman/shedos>
+#
+# greetd greeter that mirrors hyprlock's visual identity. Renders the
+# wallpaper, clock, branding, and password input directly via
+# wlr-layer-shell + fontdue (no GTK), then authenticates against
+# greetd's IPC socket (PAM runs server-side as root).
+
+pkgname=shedos-greeter
+pkgver=2026.05.01
+pkgrel=1
+pkgdesc='ShedOS greetd greeter (hyprlock-styled login screen)'
+arch=('x86_64')
+url='https://github.com/theshedman/shedos'
+license=('GPL-3.0-or-later')
+
+depends=(
+    'gcc-libs'                # rust runtime
+    'glibc'
+    'wayland'                 # libwayland-client.so.0 — surface protocol
+    'libxkbcommon'            # smithay-client-toolkit keyboard handling
+    'ttf-jetbrains-mono-nerd' # clock + branding font
+    'greetd'                  # we are its [default_session].command
+    'shedos-branding'         # /usr/share/shedos/wallpapers/dusk*.png
+)
+
+makedepends=(
+    'rust>=1.75'              # workspace builds against rust 2021 edition
+    'cargo'
+    'scdoc'                   # man page render
+)
+
+prepare() {
+    cd "$startdir"
+    install -d man/build
+    for src in man/*.scd; do
+        out=man/build/$(basename "${src%.scd}")
+        scdoc < "$src" > "$out"
+    done
+}
+
+build() {
+    cd "$startdir"
+    # `--locked` enforces the vendored Cargo.lock so CI can't silently
+    # pick up a transitive update; `--frozen` is implicit when locked.
+    cargo build --release --locked
+}
+
+check() {
+    cd "$startdir"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$startdir"
+
+    install -Dm755 target/release/shedos-greeter \
+        "$pkgdir/usr/bin/shedos-greeter"
+
+    install -Dm644 man/build/shedos-greeter.1 \
+        "$pkgdir/usr/share/man/man1/shedos-greeter.1"
+}
