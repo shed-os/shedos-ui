@@ -12,8 +12,12 @@ name = "shedos-greeter"
 path = "src/main.rs"
 
 [dependencies]
-# Deps land per-commit as the Wayland surface, greetd IPC, and rendering
-# pipeline come online. Scaffold ships with none so `cargo build` is fast.
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
 
 [profile.release]
 strip = "symbols"
