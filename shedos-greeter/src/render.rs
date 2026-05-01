@@ -178,7 +178,7 @@ impl App {
         let cmd = vec![
             "/bin/sh".to_string(),
             "-c".to_string(),
-            "clear 2>/dev/null; exec uwsm start hyprland.desktop".to_string(),
+            "clear 2>/dev/null; exec uwsm start -- hyprland.desktop".to_string(),
         ];
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
