@@ -12,6 +12,9 @@ use std::path::PathBuf;
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Yield DRM to cage. Best-effort; silent no-op if plymouthd isn't running.
+    let _ = std::process::Command::new("plymouth").arg("deactivate").status();
+
     // For now, take the wallpaper as positional argv[1]; the theme
     // reconciler will eventually feed this via /etc/shedos/themes/current/.
     let wallpaper = std::env::args()

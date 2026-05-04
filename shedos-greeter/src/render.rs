@@ -188,6 +188,9 @@ impl App {
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
                 log::info!("auth + start_session OK; greeter exiting for {}", username);
+                // Re-engage plymouth to bridge cage→Hyprland gap. Best-effort;
+                // silent no-op if plymouthd isn't running.
+                let _ = std::process::Command::new("plymouth").arg("show-splash").status();
                 self.exit = true;
             }
             Err(e) => {
