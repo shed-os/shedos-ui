@@ -9,7 +9,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/shedos-screensaver --mode=wayland --hold 5
+ExecStart=/usr/bin/shedos-screensaver --mode=wayland --idle-daemon --hold 5
 # SIGUSR1 is the screensaver's own clean-exit signal; the binary's
 # signal handler flips a should_exit flag the render loop polls at
 # ~60 Hz, so a healthy SIGUSR1 path tears down sub-frame.
