@@ -79,7 +79,14 @@ impl Auth {
             }
         }
 
-        Request::StartSession { cmd, env: vec![] }
+        let env = vec![
+            "XDG_SESSION_TYPE=wayland".to_string(),
+            "XDG_CURRENT_DESKTOP=Hyprland".to_string(),
+            "XDG_SESSION_DESKTOP=Hyprland".to_string(),
+            "PATH=/usr/local/bin:/usr/bin:/bin".to_string(),
+            "UWSM_LOG_LEVEL=warning".to_string(),
+        ];
+        Request::StartSession { cmd, env }
             .write_to(&mut self.stream)
             .context("write StartSession")?;
         match Response::read_from(&mut self.stream).context("read StartSession response")? {

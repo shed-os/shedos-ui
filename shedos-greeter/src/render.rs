@@ -176,9 +176,14 @@ impl App {
         };
         let password = std::mem::take(&mut self.password);
         let cmd = vec![
-            "/bin/sh".to_string(),
-            "-c".to_string(),
-            "clear 2>/dev/null; exec uwsm start -- hyprland.desktop".to_string(),
+            "/usr/bin/uwsm".to_string(),
+            "start".to_string(),
+            "-g".to_string(),
+            "-1".to_string(),
+            "-e".to_string(),
+            "-D".to_string(),
+            "Hyprland".to_string(),
+            "hyprland.desktop".to_string(),
         ];
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
@@ -186,20 +191,12 @@ impl App {
                 self.exit = true;
             }
             Err(e) => {
-                // self.password was cleared by mem::take above. Surface
-                // the failure to the user via a red-border + error text
-                // hold matching hyprlock's `fail_color`/`fail_timeout`.
-                // Show the actual greetd error message (truncated) so
-                // PAM rejection reasons are visible without grep-ing the
-                // journal — empty error chains fall back to a generic
-                // string.
                 log::warn!("login failed: {:#}", e);
                 let msg = format!("{:#}", e);
-                let trimmed: String = msg.chars().take(60).collect();
-                self.error_text = if trimmed.is_empty() {
+                self.error_text = if msg.is_empty() {
                     "Authentication Failed".to_string()
                 } else {
-                    trimmed
+                    msg
                 };
                 self.error_until = Some(Instant::now() + ERROR_HOLD);
             }

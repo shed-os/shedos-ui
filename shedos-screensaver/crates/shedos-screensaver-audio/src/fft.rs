@@ -3,6 +3,7 @@
 //! `Analyzer` struct, so it's straightforward to unit-test against
 //! synthetic sine inputs.
 
+use realfft::num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
 use shedos_screensaver_core::{AudioFrame, NUM_BANDS};
 use std::sync::Arc;
@@ -22,6 +23,16 @@ pub struct Analyzer {
     window_size: usize,
     /// Hann window coefficients, baked once.
     hann: Vec<f32>,
+    /// Reusable windowed-sample scratch (length = window_size).
+    input: Vec<f32>,
+    /// Reusable FFT output scratch (length = window_size/2 + 1).
+    output: Vec<Complex<f32>>,
+    /// Log-spaced band edges, computed once.
+    band_edges: [f32; NUM_BANDS + 1],
+    /// Hann coherent gain (≈ window_size / 2), used to normalize magnitudes.
+    coherent_gain: f32,
+    /// FFT bin width in Hz, used to map band edges → bin indices.
+    bin_hz: f32,
     /// Rolling buffer of recent bass-band energies for beat detection.
     bass_history: Vec<f32>,
     bass_idx: usize,
@@ -33,17 +44,32 @@ impl Analyzer {
     pub fn new(window_size: usize, sample_rate: u32) -> Self {
         let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(window_size);
-        let hann = (0..window_size)
+        let hann: Vec<f32> = (0..window_size)
             .map(|i| {
                 let x = (i as f32) / (window_size as f32 - 1.0);
                 0.5 * (1.0 - (2.0 * std::f32::consts::PI * x).cos())
             })
             .collect();
+        let input = vec![0.0; window_size];
+        let output = fft.make_output_vec();
+        let nyquist = sample_rate as f32 / 2.0;
+        let bin_hz = nyquist / (window_size as f32 / 2.0);
+        let log_min = MIN_HZ.ln();
+        let log_max = nyquist.ln();
+        let mut band_edges = [0.0f32; NUM_BANDS + 1];
+        for (i, edge) in band_edges.iter_mut().enumerate() {
+            *edge = (log_min + (log_max - log_min) * (i as f32 / NUM_BANDS as f32)).exp();
+        }
         Self {
             fft,
             sample_rate,
             window_size,
             hann,
+            input,
+            output,
+            band_edges,
+            coherent_gain: window_size as f32 * 0.5,
+            bin_hz,
             bass_history: vec![0.0; ROLLING_WINDOW],
             bass_idx: 0,
             history_count: 0,
@@ -52,46 +78,35 @@ impl Analyzer {
 
     pub fn analyze(&mut self, samples: &[f32]) -> AudioFrame {
         debug_assert_eq!(samples.len(), self.window_size, "analyze: window size mismatch");
-        let mut input: Vec<f32> = samples
-            .iter()
-            .zip(self.hann.iter())
-            .map(|(s, w)| s * w)
-            .collect();
-        let mut output = self.fft.make_output_vec();
+        for i in 0..self.window_size {
+            self.input[i] = samples[i] * self.hann[i];
+        }
         // Process is infallible for matching sizes.
-        let _ = self.fft.process(&mut input, &mut output);
+        let _ = self.fft.process(&mut self.input, &mut self.output);
 
-        // FFT bin frequencies span 0..nyquist over `window_size/2 + 1` bins.
-        let nyquist = self.sample_rate as f32 / 2.0;
-        let bin_hz = nyquist / (self.window_size as f32 / 2.0);
-
-        // Build NUM_BANDS log-spaced bins from MIN_HZ to nyquist.
+        // Build NUM_BANDS log-spaced bins from cached edges.
         let mut bands = [0.0f32; NUM_BANDS];
-        let log_min = MIN_HZ.ln();
-        let log_max = nyquist.ln();
-        let band_edges: Vec<f32> = (0..=NUM_BANDS)
-            .map(|i| (log_min + (log_max - log_min) * (i as f32 / NUM_BANDS as f32)).exp())
-            .collect();
         // Sum-of-magnitudes per band (not average) so localized tones
         // — which only light one bin — aren't washed out by being
         // divided across the full band's bin count. Normalize by the
         // window size's Hann coherent gain (≈ N/2) so a unit-amplitude
         // sine peaks at ≈ 0.5.
-        let coherent_gain = self.window_size as f32 * 0.5;
-        for (band_i, band_pair) in band_edges.windows(2).enumerate() {
+        for (band_i, band_pair) in self.band_edges.windows(2).enumerate() {
             let lo_hz = band_pair[0];
             let hi_hz = band_pair[1];
-            let lo_bin = ((lo_hz / bin_hz).floor() as usize).max(1);
-            let hi_bin = ((hi_hz / bin_hz).ceil() as usize).min(output.len() - 1);
+            let lo_bin = ((lo_hz / self.bin_hz).floor() as usize).max(1);
+            let hi_bin = ((hi_hz / self.bin_hz).ceil() as usize).min(self.output.len() - 1);
             if hi_bin <= lo_bin {
                 continue;
             }
             let mut sum = 0.0;
             for bin in lo_bin..hi_bin {
-                let mag = (output[bin].re * output[bin].re + output[bin].im * output[bin].im).sqrt();
+                let mag = (self.output[bin].re * self.output[bin].re
+                    + self.output[bin].im * self.output[bin].im)
+                    .sqrt();
                 sum += mag;
             }
-            bands[band_i] = (sum / coherent_gain).clamp(0.0, 1.0);
+            bands[band_i] = (sum / self.coherent_gain).clamp(0.0, 1.0);
         }
 
         let peak = bands.iter().copied().fold(0.0_f32, f32::max);

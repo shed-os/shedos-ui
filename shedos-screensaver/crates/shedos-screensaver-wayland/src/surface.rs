@@ -29,7 +29,7 @@ use smithay_client_toolkit::{
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
@@ -111,10 +111,11 @@ impl WaylandRenderer {
             wallpaper_path: config.wallpaper_path,
             wallpaper_dim: config.wallpaper_dim,
             wallpaper_cache: None,
-            fps_cap: config.fps_cap,
             last_frame: None,
             frame: Frame::new(0, 0),
+            needs_redraw: true,
         };
+        let _ = config.fps_cap;
 
         // Wait for the first configure so width/height land before we
         // start rendering. Block on the queue until configured=true.
@@ -127,22 +128,20 @@ impl WaylandRenderer {
             return Ok(());
         }
 
-        // Main render loop.
-        let frame_budget = Duration::from_secs_f64(1.0 / state.fps_cap.max(1) as f64);
+        // Render loop driven by frame callbacks. blocking_dispatch reads
+        // the wayland socket so wl_buffer.release events arrive and the
+        // SlotPool reuses slots — using dispatch_pending here would let
+        // releases pile up in the kernel buffer and the pool would grow
+        // by ~one framebuffer per render (≈8 MB/frame at 1080p).
         while !state.should_exit() && !state.input_dismissed {
-            // Pump pending events without blocking so input is responsive.
             event_queue
-                .dispatch_pending(&mut state)
+                .blocking_dispatch(&mut state)
                 .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
-            state.render_one(&qh)?;
-            // Pace to fps_cap.
-            if let Some(last) = state.last_frame {
-                let now = Instant::now();
-                let elapsed = now.duration_since(last);
-                if elapsed < frame_budget {
-                    std::thread::sleep(frame_budget - elapsed);
-                }
+            if !state.needs_redraw {
+                continue;
             }
+            state.needs_redraw = false;
+            state.render_one(&qh)?;
             state.last_frame = Some(Instant::now());
         }
 
@@ -170,9 +169,9 @@ struct AppState {
     wallpaper_path: Option<PathBuf>,
     wallpaper_dim: f32,
     wallpaper_cache: Option<Wallpaper>,
-    fps_cap: u32,
     last_frame: Option<Instant>,
     frame: Frame,
+    needs_redraw: bool,
 }
 
 impl AppState {
@@ -286,16 +285,15 @@ impl AppState {
             }
         }
 
-        // 3) Attach + commit.
-        self.layer
-            .wl_surface()
-            .damage_buffer(0, 0, self.width as i32, self.height as i32);
+        // 3) Request the next frame callback before commit so the
+        // compositor schedules us at vsync, then attach + commit.
+        let surface = self.layer.wl_surface().clone();
+        surface.frame(qh, surface.clone());
+        surface.damage_buffer(0, 0, self.width as i32, self.height as i32);
         buffer
-            .attach_to(self.layer.wl_surface())
+            .attach_to(&surface)
             .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
         self.layer.commit();
-        // Buffer release is implicit; SlotPool reuses on next create_buffer.
-        let _ = qh;
         Ok(())
     }
 }
@@ -350,7 +348,9 @@ impl CompositorHandler for AppState {
         _qh: &QueueHandle<Self>,
         _surface: &WlSurface,
         _time: u32,
-    ) {}
+    ) {
+        self.needs_redraw = true;
+    }
 
     fn surface_enter(
         &mut self,
@@ -511,6 +511,7 @@ impl LayerShellHandler for AppState {
             self.configured = true;
             // Wallpaper cache is sized to the surface; force re-prep on next render.
             self.wallpaper_cache = None;
+            self.needs_redraw = true;
         }
     }
 }
