@@ -7,7 +7,7 @@
 
 pkgname=shedos-greeter
 pkgver=2026.05.04
-pkgrel=2
+pkgrel=3
 pkgdesc='ShedOS greetd greeter (hyprlock-styled login screen)'
 arch=('x86_64')
 url='https://github.com/theshedman/shedos'
