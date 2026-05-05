@@ -176,10 +176,14 @@ impl App {
         };
         let password = std::mem::take(&mut self.password);
         let cmd = vec![
-            "/bin/sh".to_string(),
-            "-c".to_string(),
-            "exec /usr/bin/uwsm start -g -1 -e -D Hyprland hyprland.desktop \
-             > /dev/null 2>&1".to_string(),
+            "/usr/bin/uwsm".to_string(),
+            "start".to_string(),
+            "-g".to_string(),
+            "-1".to_string(),
+            "-e".to_string(),
+            "-D".to_string(),
+            "Hyprland".to_string(),
+            "hyprland.desktop".to_string(),
         ];
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
