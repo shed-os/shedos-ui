@@ -56,6 +56,11 @@ impl Registry {
                 ("pixelate-in",      || Box::new(effects::pixelate_in::PixelateIn::new())),
                 ("circuit-trace",    || Box::new(effects::circuit_trace::CircuitTrace::new())),
                 ("kaleidoscope",     || Box::new(effects::kaleidoscope::Kaleidoscope::new())),
+                ("dawn",             || Box::new(effects::dawn::Dawn::new())),
+                ("lighthouse",       || Box::new(effects::lighthouse::Lighthouse::new())),
+                ("flashlight",       || Box::new(effects::flashlight::Flashlight::new())),
+                ("iris-out",         || Box::new(effects::iris_out::IrisOut::new())),
+                ("prism-split",      || Box::new(effects::prism_split::PrismSplit::new())),
             ],
         }
     }

@@ -25,10 +25,10 @@ when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
 Twelve SHEDOS art variants ship in the catalog (block, ansi-shadow,
 big, outline, 3d-iso, gradient, emboss, shadow-cast, wide,
-triple-line, tall, mirror-flip). Forty-one effects ship in the
+triple-line, tall, mirror-flip). Forty-six effects ship in the
 registry. Each variant carries a five-color Catppuccin Mocha
 palette picked uniformly per session, so a random run draws from
-12 × 5 × 41 = 2460 visually distinct sessions.
+12 × 5 × 46 = 2760 visually distinct sessions.
 
 # READ-ONLY OPTIONS
 
@@ -118,7 +118,7 @@ palette picked uniformly per session, so a random run draws from
 
 # EFFECTS
 
-The 41 ship effects. Run *shedos-screensaver --list* for the live
+The 46 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -281,6 +281,30 @@ catalog with durations.
 	Top-left quadrant fills first; mirrored copies appear in the
 	other three quadrants then fade as the canonical SHEDOS
 	resolves.
+
+*dawn*
+	Gradient brightness sweeps left-to-right across the canvas
+	like a sunrise; cells reveal through a warm tint as the
+	light front passes.
+
+*lighthouse*
+	A single rotating beam from the canvas center sweeps clockwise;
+	cells reveal as the beam first reaches their angle.
+
+*flashlight*
+	A circular cone of light moves diagonally from top-left to
+	bottom-right; cells inside the cone flash bright, cells past
+	it settle to target color.
+
+*iris-out*
+	A circular iris opens from a small dot at canvas center,
+	expanding to fill the canvas; a faint vignette texture covers
+	the area outside the iris.
+
+*prism-split*
+	Each lit cell starts as three RGB ghost copies at horizontal
+	offsets — red left, blue right, center at canonical; offsets
+	shrink to zero as the chromatic aberration focuses.
 
 # LOGO VARIANTS
 
