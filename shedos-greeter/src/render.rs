@@ -238,16 +238,10 @@ impl App {
             return;
         };
         let password = std::mem::take(&mut self.password);
-        let cmd = vec![
-            "/usr/bin/uwsm".to_string(),
-            "start".to_string(),
-            "-g".to_string(),
-            "-1".to_string(),
-            "-e".to_string(),
-            "-D".to_string(),
-            "Hyprland".to_string(),
-            "hyprland.desktop".to_string(),
-        ];
+        // Wrapper redirects uwsm + Hyprland stdout/stderr into journald
+        // so the post-auth gap doesn't flash text on the framebuffer
+        // console. Logs surface via `journalctl -t hyprland-session`.
+        let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
                 log::info!("auth + start_session OK; greeter exiting for {}", username);
