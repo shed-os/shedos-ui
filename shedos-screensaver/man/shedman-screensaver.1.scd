@@ -115,7 +115,7 @@ With both axes random, that's 104 visually distinct sessions.
 
 # EFFECTS
 
-The 36 ship effects. Run *shedos-screensaver --list* for the live
+The 41 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -256,6 +256,28 @@ catalog with durations.
 *firework*
 	Three burst points emit colored sparks that drift along
 	parabolic arcs to SHEDOS cells.
+
+*brick-build*
+	Cells slide in from the nearest edge like bricks stacking up;
+	bottom rows arrive first so the wall builds upward.
+
+*hexagon-tile*
+	Cells reveal in a diagonal hex-flow sweep; each shows a brief
+	hex glyph during its flip, then settles to the target.
+
+*pixelate-in*
+	A coarse 8× pixelated SHEDOS appears immediately and refines
+	through 4× and 2× until the art is sharp.
+
+*circuit-trace*
+	Bright PCB-style traces draw between consecutive SHEDOS cells
+	in a greedy nearest-neighbor traversal; trace cells fade after
+	the connecting cell materializes.
+
+*kaleidoscope*
+	Top-left quadrant fills first; mirrored copies appear in the
+	other three quadrants then fade as the canonical SHEDOS
+	resolves.
 
 # LOGO VARIANTS
 

@@ -51,6 +51,11 @@ impl Registry {
                 ("ember-rise",       || Box::new(effects::ember_rise::EmberRise::new())),
                 ("dust-settle",      || Box::new(effects::dust_settle::DustSettle::new())),
                 ("firework",         || Box::new(effects::firework::Firework::new())),
+                ("brick-build",      || Box::new(effects::brick_build::BrickBuild::new())),
+                ("hexagon-tile",     || Box::new(effects::hexagon_tile::HexagonTile::new())),
+                ("pixelate-in",      || Box::new(effects::pixelate_in::PixelateIn::new())),
+                ("circuit-trace",    || Box::new(effects::circuit_trace::CircuitTrace::new())),
+                ("kaleidoscope",     || Box::new(effects::kaleidoscope::Kaleidoscope::new())),
             ],
         }
     }
