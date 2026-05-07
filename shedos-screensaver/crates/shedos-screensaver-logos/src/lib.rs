@@ -235,6 +235,45 @@ pub const LIBRARY: &[LogoVariant] = &[
             NamedColor { name: "lavender", color: MOCHA.lavender },
         ],
     },
+    LogoVariant {
+        name: "stripe",
+        title: "Stripe",
+        art: include_str!("../art/stripe.txt"),
+        description: "Block letters with alternating row densities — bars in █, verticals in ▒. 5 rows.",
+        colors: &[
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+        ],
+    },
+    LogoVariant {
+        name: "boxed",
+        title: "Boxed",
+        art: include_str!("../art/boxed.txt"),
+        description: "Block letters surrounded by a ░ rectangular frame. 7 rows.",
+        colors: &[
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "blue", color: MOCHA.blue },
+        ],
+    },
+    LogoVariant {
+        name: "checkered",
+        title: "Checkered",
+        art: include_str!("../art/checkered.txt"),
+        description: "Block letters with a fine █/▓ checkerboard pattern within letter shapes. 5 rows.",
+        colors: &[
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+        ],
+    },
 ];
 
 /// Look up a variant by name. None if no variant matches.
