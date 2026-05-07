@@ -41,6 +41,11 @@ impl Registry {
                 ("data-stream",   || Box::new(effects::data_stream::DataStream::new())),
                 ("tetris",        || Box::new(effects::tetris::Tetris::new())),
                 ("boot-sequence", || Box::new(effects::boot_sequence::BootSequence::new())),
+                ("fog-clear",        || Box::new(effects::fog_clear::FogClear::new())),
+                ("lightning-strike", || Box::new(effects::lightning_strike::LightningStrike::new())),
+                ("echo-fade",        || Box::new(effects::echo_fade::EchoFade::new())),
+                ("fault-line",       || Box::new(effects::fault_line::FaultLine::new())),
+                ("vortex",           || Box::new(effects::vortex::Vortex::new())),
             ],
         }
     }

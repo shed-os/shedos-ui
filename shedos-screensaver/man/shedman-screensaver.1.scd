@@ -115,7 +115,7 @@ With both axes random, that's 104 visually distinct sessions.
 
 # EFFECTS
 
-The 26 ship effects. Run *shedos-screensaver --list* for the live
+The 31 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -212,6 +212,29 @@ catalog with durations.
 *boot-sequence*
 	Fake terminal boot log scrolls up; the final line is `Initializing
 	SHEDOS…` and the art emerges from below.
+
+*fog-clear*
+	Full canvas covered by a fog texture; the fog dissipates radially
+	outward from center, revealing SHEDOS as it thins.
+
+*lightning-strike*
+	Branched lightning bolts strike at random angles; each bolt
+	illuminates a cluster of cells in a brief white flash that fades
+	to the target color.
+
+*echo-fade*
+	Multiple ghost copies of SHEDOS appear at offsets and converge
+	toward canonical position; each fades in then out, the final
+	copy solidifies.
+
+*fault-line*
+	A horizontal seismic crack tears the canvas open at the middle
+	row; the halves separate, revealing SHEDOS in the widening gap.
+
+*vortex*
+	A clockwise spiral arm sweeps inward from canvas perimeter to
+	center; cells reveal at canonical positions as the arm passes
+	their (angle, radius).
 
 # LOGO VARIANTS
 
