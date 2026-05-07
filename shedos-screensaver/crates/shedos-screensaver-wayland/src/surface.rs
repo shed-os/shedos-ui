@@ -122,11 +122,13 @@ impl WaylandRenderer {
         }
 
         // Render loop. Each surface flips its own `needs_redraw` from
-        // its frame callback; we render whichever are ready.
+        // its frame callback; we render whichever are ready, then
+        // dispatch to wait for the next callback. Order matters: a
+        // dispatch-first loop would block on the first iteration
+        // because the configure event has already been consumed
+        // upstream and no further events arrive until we commit the
+        // first buffer.
         while !state.should_exit() && !state.input_dismissed {
-            event_queue
-                .blocking_dispatch(&mut state)
-                .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
             for i in 0..state.surfaces.len() {
                 if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
                     state.render_surface(i)?;
@@ -134,6 +136,12 @@ impl WaylandRenderer {
                     state.surfaces[i].last_frame = Some(Instant::now());
                 }
             }
+            if state.should_exit() || state.input_dismissed {
+                break;
+            }
+            event_queue
+                .blocking_dispatch(&mut state)
+                .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
         }
 
         Ok(())
@@ -588,8 +596,36 @@ impl LayerShellHandler for AppState {
         let Some(idx) = self.surface_index_by_layer(layer) else {
             return;
         };
+        // Per the wlr-layer-shell-unstable-v1 spec, a `configure` with
+        // dimension zero in either axis means "compositor leaves it
+        // up to the client". Some compositors (Hyprland on certain
+        // builds) send (0, 0) for fullscreen-anchored overlays; fall
+        // back to the output's logical or current-mode dimensions so
+        // we always end up with a usable size.
+        let output = self.surfaces[idx].output.clone();
+        let (mut w, mut h) = configure.new_size;
+        if w == 0 || h == 0 {
+            if let Some(info) = self.output_state.info(&output) {
+                let fallback = info
+                    .logical_size
+                    .map(|(lw, lh)| (lw.max(0) as u32, lh.max(0) as u32))
+                    .or_else(|| {
+                        info.modes
+                            .iter()
+                            .find(|m| m.current)
+                            .map(|m| (m.dimensions.0.max(0) as u32, m.dimensions.1.max(0) as u32))
+                    });
+                if let Some((fw, fh)) = fallback {
+                    if w == 0 {
+                        w = fw;
+                    }
+                    if h == 0 {
+                        h = fh;
+                    }
+                }
+            }
+        }
         let s = &mut self.surfaces[idx];
-        let (w, h) = configure.new_size;
         if w > 0 && h > 0 {
             s.width = w;
             s.height = h;
