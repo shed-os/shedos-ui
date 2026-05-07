@@ -23,10 +23,13 @@ The same binary backs both surfaces — pass *--mode=tty* or
 *--mode=wayland* to force one. Default *--mode=auto* picks Wayland
 when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
-Eight SHEDOS art variants ship in the catalog (block, ansi-shadow,
-slant, big, small, doom, outline, mini). Twenty-six effects ship
-in the registry. With both axes random, that's 208 visually
-distinct sessions.
+Fifteen SHEDOS art variants ship in the catalog (block, ansi-shadow,
+big, outline, 3d-iso, gradient, emboss, shadow-cast, wide,
+triple-line, tall, mirror-flip, stripe, boxed, checkered).
+Forty-six effects ship in the registry. Each variant carries a
+five-color Catppuccin Mocha palette picked uniformly per session,
+so a random run draws from 15 × 5 × 46 = 3450 visually distinct
+sessions.
 
 # READ-ONLY OPTIONS
 
@@ -116,7 +119,7 @@ distinct sessions.
 
 # EFFECTS
 
-The 26 ship effects. Run *shedos-screensaver --list* for the live
+The 46 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -214,12 +217,104 @@ catalog with durations.
 	Fake terminal boot log scrolls up; the final line is `Initializing
 	SHEDOS…` and the art emerges from below.
 
+*fog-clear*
+	Full canvas covered by a fog texture; the fog dissipates radially
+	outward from center, revealing SHEDOS as it thins.
+
+*lightning-strike*
+	Branched lightning bolts strike at random angles; each bolt
+	illuminates a cluster of cells in a brief white flash that fades
+	to the target color.
+
+*echo-fade*
+	Multiple ghost copies of SHEDOS appear at offsets and converge
+	toward canonical position; each fades in then out, the final
+	copy solidifies.
+
+*fault-line*
+	A horizontal seismic crack tears the canvas open at the middle
+	row; the halves separate, revealing SHEDOS in the widening gap.
+
+*vortex*
+	A clockwise spiral arm sweeps inward from canvas perimeter to
+	center; cells reveal at canonical positions as the arm passes
+	their (angle, radius).
+
+*snowstorm*
+	Snowflakes drift down with gentle horizontal sway; each flake
+	sticks to its assigned SHEDOS cell on arrival.
+
+*fountain*
+	Particles spray upward from a center point at the canvas
+	bottom, arc outward under gravity, and land at SHEDOS cell
+	positions.
+
+*ember-rise*
+	Glowing embers float upward from below with flickering
+	brightness; settle into the SHEDOS shape from bottom up.
+
+*dust-settle*
+	Dust motes swirl chaotically with decaying amplitude;
+	crystallize into the SHEDOS shape as the swirl damps to zero.
+
+*firework*
+	Three burst points emit colored sparks that drift along
+	parabolic arcs to SHEDOS cells.
+
+*brick-build*
+	Cells slide in from the nearest edge like bricks stacking up;
+	bottom rows arrive first so the wall builds upward.
+
+*hexagon-tile*
+	Cells reveal in a diagonal hex-flow sweep; each shows a brief
+	hex glyph during its flip, then settles to the target.
+
+*pixelate-in*
+	A coarse 8× pixelated SHEDOS appears immediately and refines
+	through 4× and 2× until the art is sharp.
+
+*circuit-trace*
+	Bright PCB-style traces draw between consecutive SHEDOS cells
+	in a greedy nearest-neighbor traversal; trace cells fade after
+	the connecting cell materializes.
+
+*kaleidoscope*
+	Top-left quadrant fills first; mirrored copies appear in the
+	other three quadrants then fade as the canonical SHEDOS
+	resolves.
+
+*dawn*
+	Gradient brightness sweeps left-to-right across the canvas
+	like a sunrise; cells reveal through a warm tint as the
+	light front passes.
+
+*lighthouse*
+	A single rotating beam from the canvas center sweeps clockwise;
+	cells reveal as the beam first reaches their angle.
+
+*flashlight*
+	A circular cone of light moves diagonally from top-left to
+	bottom-right; cells inside the cone flash bright, cells past
+	it settle to target color.
+
+*iris-out*
+	A circular iris opens from a small dot at canvas center,
+	expanding to fill the canvas; a faint vignette texture covers
+	the area outside the iris.
+
+*prism-split*
+	Each lit cell starts as three RGB ghost copies at horizontal
+	offsets — red left, blue right, center at canonical; offsets
+	shrink to zero as the chromatic aberration focuses.
+
 # LOGO VARIANTS
 
-Eight SHEDOS art variants. Run *shedos-screensaver --list-logos*
+Fifteen SHEDOS art variants. Run *shedos-screensaver --list-logos*
 for descriptions.
 
-*block*, *ansi-shadow*, *slant*, *big*, *small*, *doom*, *outline*, *mini*
+*block*, *ansi-shadow*, *big*, *outline*, *3d-iso*, *gradient*,
+*emboss*, *shadow-cast*, *wide*, *triple-line*, *tall*,
+*mirror-flip*, *stripe*, *boxed*, *checkered*
 
 # CONFIGURATION
 

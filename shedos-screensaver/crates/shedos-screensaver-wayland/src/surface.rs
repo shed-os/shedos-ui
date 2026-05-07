@@ -1,5 +1,17 @@
-//! Layer-shell overlay surface + wl_shm framebuffer + the Wayland
-//! event loop that drives the frame producer.
+//! Per-output layer-shell overlay surfaces + the Wayland event loop
+//! that drives independent frame producers per monitor.
+//!
+//! Single monitor: one layer surface anchored to all four edges of
+//! the only `wl_output`, layered above everything. Multi-monitor: N
+//! surfaces, one per `wl_output`, each with its own frame producer
+//! so each screen runs an independent (LogoVariant, Effect) cycle.
+//!
+//! The `producer_factory` closure mints producers lazily as outputs
+//! appear (boot-time and via hotplug). For resources that exist
+//! once-per-process (like the cpal audio stream) the closure typically
+//! `take()`s an Option on first call so a single output gets it and
+//! later outputs get `None` — the audio-reactive effects fall back to
+//! their silence path on those screens.
 
 use crate::font::FontAtlas;
 use crate::wallpaper::Wallpaper;
@@ -36,15 +48,21 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-/// Renderer entry point. Owns the connection, surface, and frame
-/// producer; runs until `should_exit` flips or the user generates
-/// input (unless `idle_daemon` is set).
+/// Mints frame producers — one per output. Called as outputs are
+/// discovered (boot-time and via hotplug). Closures with `take()`-able
+/// captures are the canonical way to hand single-instance resources
+/// to the first call only.
+pub type ProducerFactory = Box<dyn FnMut() -> Box<dyn FrameProducer>>;
+
+/// Renderer entry point. Discovers every wl_output the compositor
+/// advertises and runs an independent layer surface + frame producer
+/// on each.
 pub struct WaylandRenderer;
 
 impl WaylandRenderer {
     pub fn run(
         config: WaylandConfig,
-        producer: Box<dyn FrameProducer>,
+        producer_factory: ProducerFactory,
         should_exit: Arc<AtomicBool>,
     ) -> Result<(), WaylandError> {
         let conn = Connection::connect_to_env()
@@ -63,31 +81,6 @@ impl WaylandRenderer {
         let shm = Shm::bind(&globals, &qh)
             .map_err(|e| WaylandError::Bind(format!("wl_shm: {e}")))?;
 
-        // Provisional surface; we'll resize the SHM pool once the
-        // compositor sends the first configure with real dimensions.
-        let surface = compositor_state.create_surface(&qh);
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surface,
-            Layer::Overlay,
-            Some("shedos-screensaver"),
-            None, // place on the default output
-        );
-        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-        layer.set_exclusive_zone(-1);
-        layer.set_keyboard_interactivity(if config.idle_daemon {
-            // Idle daemon mode wants pre-input dismiss via SIGUSR1, not a
-            // direct keyboard grab — leaves the focused app reacting to
-            // the user's first keypress while we tear down on the signal.
-            KeyboardInteractivity::OnDemand
-        } else {
-            KeyboardInteractivity::Exclusive
-        });
-        layer.commit();
-
-        // Provisional pool (1x1) — we'll grow it on first configure.
-        let pool = SlotPool::new(4, &shm).map_err(|e| WaylandError::Pool(format!("{e}")))?;
-
         let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
             .map_err(|e| WaylandError::Font(format!("{e}")))?;
 
@@ -96,30 +89,30 @@ impl WaylandRenderer {
             output_state,
             seat_state,
             shm,
-            layer,
-            pool,
-            width: 0,
-            height: 0,
-            configured: false,
+            compositor_state,
+            layer_shell,
+            qh: qh.clone(),
             keyboard: None,
             pointer: None,
             should_exit: Arc::clone(&should_exit),
             input_dismissed: false,
             idle_daemon: config.idle_daemon,
-            producer,
+            producer_factory,
             font,
             wallpaper_path: config.wallpaper_path,
             wallpaper_dim: config.wallpaper_dim,
-            wallpaper_cache: None,
-            last_frame: None,
-            frame: Frame::new(0, 0),
-            needs_redraw: true,
+            surfaces: Vec::new(),
         };
         let _ = config.fps_cap;
 
-        // Wait for the first configure so width/height land before we
-        // start rendering. Block on the queue until configured=true.
-        while !state.configured && !state.should_exit() {
+        // Drain the queue once so OutputHandler::new_output fires for
+        // every output already advertised at startup.
+        event_queue
+            .roundtrip(&mut state)
+            .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
+
+        // Wait until at least one surface gets its first configure.
+        while !state.any_configured() && !state.should_exit() {
             event_queue
                 .blocking_dispatch(&mut state)
                 .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
@@ -128,25 +121,45 @@ impl WaylandRenderer {
             return Ok(());
         }
 
-        // Render loop driven by frame callbacks. blocking_dispatch reads
-        // the wayland socket so wl_buffer.release events arrive and the
-        // SlotPool reuses slots — using dispatch_pending here would let
-        // releases pile up in the kernel buffer and the pool would grow
-        // by ~one framebuffer per render (≈8 MB/frame at 1080p).
+        // Render loop. Each surface flips its own `needs_redraw` from
+        // its frame callback; we render whichever are ready, then
+        // dispatch to wait for the next callback. Order matters: a
+        // dispatch-first loop would block on the first iteration
+        // because the configure event has already been consumed
+        // upstream and no further events arrive until we commit the
+        // first buffer.
         while !state.should_exit() && !state.input_dismissed {
+            for i in 0..state.surfaces.len() {
+                if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
+                    state.render_surface(i)?;
+                    state.surfaces[i].needs_redraw = false;
+                    state.surfaces[i].last_frame = Some(Instant::now());
+                }
+            }
+            if state.should_exit() || state.input_dismissed {
+                break;
+            }
             event_queue
                 .blocking_dispatch(&mut state)
                 .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
-            if !state.needs_redraw {
-                continue;
-            }
-            state.needs_redraw = false;
-            state.render_one(&qh)?;
-            state.last_frame = Some(Instant::now());
         }
 
         Ok(())
     }
+}
+
+struct OutputSurface {
+    output: WlOutput,
+    layer: LayerSurface,
+    pool: SlotPool,
+    width: u32,
+    height: u32,
+    configured: bool,
+    wallpaper_cache: Option<Wallpaper>,
+    last_frame: Option<Instant>,
+    frame: Frame,
+    producer: Box<dyn FrameProducer>,
+    needs_redraw: bool,
 }
 
 struct AppState {
@@ -154,24 +167,19 @@ struct AppState {
     output_state: OutputState,
     seat_state: SeatState,
     shm: Shm,
-    layer: LayerSurface,
-    pool: SlotPool,
-    width: u32,
-    height: u32,
-    configured: bool,
+    compositor_state: CompositorState,
+    layer_shell: LayerShell,
+    qh: QueueHandle<Self>,
     keyboard: Option<WlKeyboard>,
     pointer: Option<WlPointer>,
     should_exit: Arc<AtomicBool>,
     input_dismissed: bool,
     idle_daemon: bool,
-    producer: Box<dyn FrameProducer>,
+    producer_factory: ProducerFactory,
     font: FontAtlas,
     wallpaper_path: Option<PathBuf>,
     wallpaper_dim: f32,
-    wallpaper_cache: Option<Wallpaper>,
-    last_frame: Option<Instant>,
-    frame: Frame,
-    needs_redraw: bool,
+    surfaces: Vec<OutputSurface>,
 }
 
 impl AppState {
@@ -179,25 +187,101 @@ impl AppState {
         self.should_exit.load(Ordering::Acquire)
     }
 
+    fn any_configured(&self) -> bool {
+        self.surfaces
+            .iter()
+            .any(|s| s.configured && s.width > 0 && s.height > 0)
+    }
+
     fn handle_input(&mut self) {
         if self.idle_daemon {
-            // Don't dismiss on input — the SIGUSR1 path is what tears
-            // us down so the lock screen can take over without a race.
             return;
         }
         self.input_dismissed = true;
     }
 
-    fn render_one(&mut self, qh: &QueueHandle<Self>) -> Result<(), WaylandError> {
-        if self.width == 0 || self.height == 0 {
+    /// Create a new layer surface bound to `output`. Mints a fresh
+    /// producer via the factory.
+    fn add_output(&mut self, output: WlOutput) {
+        // Defence against duplicate `new_output` events.
+        if self.surfaces.iter().any(|s| s.output == output) {
+            return;
+        }
+
+        let surface = self.compositor_state.create_surface(&self.qh);
+        let layer = self.layer_shell.create_layer_surface(
+            &self.qh,
+            surface,
+            Layer::Overlay,
+            Some("shedos-screensaver"),
+            Some(&output),
+        );
+        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+        layer.set_exclusive_zone(-1);
+        layer.set_keyboard_interactivity(if self.idle_daemon {
+            KeyboardInteractivity::OnDemand
+        } else {
+            KeyboardInteractivity::Exclusive
+        });
+        layer.commit();
+
+        let pool = match SlotPool::new(4, &self.shm) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!(
+                    "shedos-screensaver-wayland: pool for new output failed: {e}"
+                );
+                return;
+            }
+        };
+
+        self.surfaces.push(OutputSurface {
+            output,
+            layer,
+            pool,
+            width: 0,
+            height: 0,
+            configured: false,
+            wallpaper_cache: None,
+            last_frame: None,
+            frame: Frame::new(0, 0),
+            producer: (self.producer_factory)(),
+            needs_redraw: true,
+        });
+    }
+
+    fn drop_output(&mut self, output: &WlOutput) {
+        self.surfaces.retain(|s| &s.output != output);
+    }
+
+    fn surface_index_by_layer(&self, target: &LayerSurface) -> Option<usize> {
+        self.surfaces
+            .iter()
+            .position(|s| s.layer.wl_surface() == target.wl_surface())
+    }
+
+    fn surface_index_by_wl_surface(&self, target: &WlSurface) -> Option<usize> {
+        self.surfaces
+            .iter()
+            .position(|s| s.layer.wl_surface() == target)
+    }
+
+    fn render_surface(&mut self, idx: usize) -> Result<(), WaylandError> {
+        if idx >= self.surfaces.len() {
             return Ok(());
         }
 
-        // Lazy-load the wallpaper now that we know the surface size.
-        if self.wallpaper_cache.is_none() {
+        // Borrow split: &self.font / &self.wallpaper_path / &self.qh
+        // are read-only; the OutputSurface at idx is mutable.
+        let s = &mut self.surfaces[idx];
+        if s.width == 0 || s.height == 0 {
+            return Ok(());
+        }
+
+        if s.wallpaper_cache.is_none() {
             if let Some(path) = &self.wallpaper_path {
-                match Wallpaper::prepare(path, self.width, self.height, self.wallpaper_dim) {
-                    Ok(w) => self.wallpaper_cache = Some(w),
+                match Wallpaper::prepare(path, s.width, s.height, self.wallpaper_dim) {
+                    Ok(w) => s.wallpaper_cache = Some(w),
                     Err(e) => eprintln!(
                         "shedos-screensaver-wayland: wallpaper '{}' failed: {e}; \
                          drawing on solid base",
@@ -208,39 +292,34 @@ impl AppState {
         }
 
         let (cell_w, cell_h) = self.font.cell_size();
-        let cols = (self.width / cell_w).max(1) as u16;
-        let rows = (self.height / cell_h).max(1) as u16;
-        if (self.frame.cols(), self.frame.rows()) != (cols, rows) {
-            self.frame = Frame::new(rows, cols);
+        let cols = (s.width / cell_w).max(1) as u16;
+        let rows = (s.height / cell_h).max(1) as u16;
+        if (s.frame.cols(), s.frame.rows()) != (cols, rows) {
+            s.frame = Frame::new(rows, cols);
         }
-        self.frame.clear();
-        self.producer.produce(&mut self.frame);
+        s.frame.clear();
+        s.producer.produce(&mut s.frame);
 
-        let stride = (self.width as i32) * 4;
-        let total_bytes = (self.height as i32) * stride;
-        let (buffer, canvas) = self
+        let stride = (s.width as i32) * 4;
+        let total_bytes = (s.height as i32) * stride;
+        let (buffer, canvas) = s
             .pool
             .create_buffer(
-                self.width as i32,
-                self.height as i32,
+                s.width as i32,
+                s.height as i32,
                 stride,
                 wl_shm::Format::Argb8888,
             )
             .map_err(|e| WaylandError::Pool(format!("create_buffer: {e}")))?;
         debug_assert_eq!(canvas.len(), total_bytes as usize);
 
-        // 1) Fill with wallpaper or BASE color.
         let pixels: &mut [u32] = unsafe {
-            // Safe: SlotPool guarantees 4-byte alignment of the canvas
-            // (Argb8888 is 4 bytes per pixel) and the slice length is a
-            // multiple of 4. We're writing into shared memory the
-            // compositor will read after we attach the buffer.
+            // Safe: SlotPool gives 4-byte alignment for Argb8888 and
+            // canvas.len() is a multiple of 4.
             let ptr = canvas.as_mut_ptr() as *mut u32;
-            std::slice::from_raw_parts_mut(ptr, (canvas.len() / 4) as usize)
+            std::slice::from_raw_parts_mut(ptr, canvas.len() / 4)
         };
-        if let Some(wp) = &self.wallpaper_cache {
-            // Wallpaper is sized to (self.width, self.height) so this
-            // copies one-to-one.
+        if let Some(wp) = &s.wallpaper_cache {
             pixels.copy_from_slice(&wp.pixels);
         } else {
             let base = pack_argb(Color::BASE);
@@ -249,15 +328,12 @@ impl AppState {
             }
         }
 
-        // 2) Composite cells on top. Hoist the baseline outside the
-        // loop so the per-cell `self.font.glyph()` mutable borrow
-        // doesn't fight with the immutable `self.font.baseline()`.
         let baseline = self.font.baseline();
-        for r in 0..self.frame.rows() {
-            for c in 0..self.frame.cols() {
-                let cell = self.frame.get(r, c).expect("in-bounds row/col");
+        for r in 0..s.frame.rows() {
+            for c in 0..s.frame.cols() {
+                let cell = s.frame.get(r, c).expect("in-bounds row/col");
                 if cell.ch == ' ' {
-                    continue; // wallpaper / base shows through
+                    continue;
                 }
                 let glyph = self.font.glyph(cell.ch);
                 let cell_x0 = (c as i32) * (cell_w as i32);
@@ -266,34 +342,32 @@ impl AppState {
                 let glyph_y0 = cell_y0 + baseline + glyph.y_offset;
                 for gy in 0..glyph.height as i32 {
                     let dst_y = glyph_y0 + gy;
-                    if dst_y < 0 || dst_y >= self.height as i32 {
+                    if dst_y < 0 || dst_y >= s.height as i32 {
                         continue;
                     }
                     for gx in 0..glyph.width as i32 {
                         let dst_x = glyph_x0 + gx;
-                        if dst_x < 0 || dst_x >= self.width as i32 {
+                        if dst_x < 0 || dst_x >= s.width as i32 {
                             continue;
                         }
                         let alpha = glyph.bitmap[(gy * glyph.width as i32 + gx) as usize];
                         if alpha == 0 {
                             continue;
                         }
-                        let i = (dst_y as usize) * (self.width as usize) + dst_x as usize;
+                        let i = (dst_y as usize) * (s.width as usize) + dst_x as usize;
                         pixels[i] = blend_over(cell.fg, pixels[i], alpha);
                     }
                 }
             }
         }
 
-        // 3) Request the next frame callback before commit so the
-        // compositor schedules us at vsync, then attach + commit.
-        let surface = self.layer.wl_surface().clone();
-        surface.frame(qh, surface.clone());
-        surface.damage_buffer(0, 0, self.width as i32, self.height as i32);
+        let surface = s.layer.wl_surface().clone();
+        surface.frame(&self.qh, surface.clone());
+        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
         buffer
             .attach_to(&surface)
             .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
-        self.layer.commit();
+        s.layer.commit();
         Ok(())
     }
 }
@@ -346,10 +420,12 @@ impl CompositorHandler for AppState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &WlSurface,
+        surface: &WlSurface,
         _time: u32,
     ) {
-        self.needs_redraw = true;
+        if let Some(idx) = self.surface_index_by_wl_surface(surface) {
+            self.surfaces[idx].needs_redraw = true;
+        }
     }
 
     fn surface_enter(
@@ -373,9 +449,18 @@ impl OutputHandler for AppState {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
     }
-    fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
+    fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, output: WlOutput) {
+        self.add_output(output);
+    }
     fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
-    fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
+    fn output_destroyed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        output: WlOutput,
+    ) {
+        self.drop_output(&output);
+    }
 }
 
 impl SeatHandler for AppState {
@@ -490,28 +575,65 @@ impl PointerHandler for AppState {
 }
 
 impl LayerShellHandler for AppState {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        self.input_dismissed = true;
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
+        if let Some(idx) = self.surface_index_by_layer(layer) {
+            self.surfaces.remove(idx);
+        }
+        // If the compositor closed every surface we owned, treat it
+        // as a dismiss — there's nothing left to render to.
+        if self.surfaces.is_empty() {
+            self.input_dismissed = true;
+        }
     }
     fn configure(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        let (w, h) = configure.new_size;
+        let Some(idx) = self.surface_index_by_layer(layer) else {
+            return;
+        };
+        // Per the wlr-layer-shell-unstable-v1 spec, a `configure` with
+        // dimension zero in either axis means "compositor leaves it
+        // up to the client". Some compositors (Hyprland on certain
+        // builds) send (0, 0) for fullscreen-anchored overlays; fall
+        // back to the output's logical or current-mode dimensions so
+        // we always end up with a usable size.
+        let output = self.surfaces[idx].output.clone();
+        let (mut w, mut h) = configure.new_size;
+        if w == 0 || h == 0 {
+            if let Some(info) = self.output_state.info(&output) {
+                let fallback = info
+                    .logical_size
+                    .map(|(lw, lh)| (lw.max(0) as u32, lh.max(0) as u32))
+                    .or_else(|| {
+                        info.modes
+                            .iter()
+                            .find(|m| m.current)
+                            .map(|m| (m.dimensions.0.max(0) as u32, m.dimensions.1.max(0) as u32))
+                    });
+                if let Some((fw, fh)) = fallback {
+                    if w == 0 {
+                        w = fw;
+                    }
+                    if h == 0 {
+                        h = fh;
+                    }
+                }
+            }
+        }
+        let s = &mut self.surfaces[idx];
         if w > 0 && h > 0 {
-            self.width = w;
-            self.height = h;
-            // Grow the SHM pool to fit one Argb8888 framebuffer.
+            s.width = w;
+            s.height = h;
             let needed = (w * h * 4) as usize;
-            let _ = self.pool.resize(needed.max(4));
-            self.configured = true;
-            // Wallpaper cache is sized to the surface; force re-prep on next render.
-            self.wallpaper_cache = None;
-            self.needs_redraw = true;
+            let _ = s.pool.resize(needed.max(4));
+            s.configured = true;
+            s.wallpaper_cache = None;
+            s.needs_redraw = true;
         }
     }
 }

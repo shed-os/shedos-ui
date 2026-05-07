@@ -13,6 +13,7 @@ list-effect-line = { $key } — { $title } ({ $duration_ms } ms): { $description
 # --list-logos output
 list-logos-header = Available logo variants:
 list-logo-line = { $key } — { $title }: { $description }
+list-logo-colors = Colors: { $palette }
 
 # --help-effect output
 help-effect-header = Effect "{ $name }":

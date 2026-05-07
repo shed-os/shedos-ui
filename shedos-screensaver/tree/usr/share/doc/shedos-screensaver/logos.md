@@ -1,30 +1,44 @@
 # shedos-screensaver logo variants
 
-Eight SHEDOS art variants ship in the binary's catalog. Each is a
+Fifteen SHEDOS art variants ship in the binary's catalog. Each is a
 different "font" rendition of the SHEDOS mark. Each cycle of the
 screensaver picks one (random by default; `--logo=NAME` locks to
 one).
 
 Run `shedos-screensaver --list-logos` for the live catalog.
 
-| Variant | Rows × Cols | Default color | Notes |
+Each variant ships with a curated palette of Catppuccin Mocha
+colors. The cycle engine picks one at random per session, so the
+same logo appears in different palette members across cycles.
+Pass `--color <name>` to lock to a specific color (any Catppuccin
+Mocha key, plus `#rrggbb`, `r,g,b`, and named ANSI all work).
+
+| Variant | Rows × Cols | Palette (first = canonical) | Notes |
 |---|---|---|---|
-| **block** | 5 × 47 | Catppuccin blue | Solid block letters. The canonical mark — also fastfetch's logo. |
-| **ansi-shadow** | 6 × 49 | Catppuccin mauve | Block letters with depth shading via Unicode box-drawing. |
-| **slant** | 5 × 36 | Catppuccin peach | Italic-style figlet font. |
-| **big** | 6 × 43 | Catppuccin green | Wide rounded letters, figlet "big" font. |
-| **small** | 4 × 28 | Catppuccin teal | Tight 4-row variant for narrow terminals. |
-| **doom** | 6 × 37 | Catppuccin red | Mailbox-style figlet "doom" font. |
-| **outline** | 5 × 36 | Catppuccin sky | Hollow letters in box-drawing characters. |
-| **mini** | 2 × 23 | Catppuccin yellow | Compact 2-row variant for tiny canvases. |
+| **block** | 5 × 47 | blue, mauve, green, peach, sapphire | Solid block letters. The canonical mark — also fastfetch's logo. |
+| **ansi-shadow** | 6 × 49 | mauve, lavender, sky, sapphire, maroon | Block letters with depth shading via Unicode box-drawing. |
+| **big** | 7 × 58 | green, yellow, peach, teal, red | Bold filled block letters at a larger scale. |
+| **outline** | 5 × 35 | sky, lavender, pink, teal, rosewater | Hollow letters in box-drawing characters. |
+| **3d-iso** | 5 × 48 | blue, sapphire, mauve, lavender, sky | Block letters with a single-cell ▒ depth shadow on each letter's right edge. |
+| **gradient** | 5 × 47 | peach, yellow, mauve, blue, teal | Block letters with a vertical density gradient — █ at the top fading through ▓▒░ to the bottom. |
+| **emboss** | 6 × 47 | red, peach, yellow, green, blue | Block letters with a single-row ░ drop shadow directly underneath. |
+| **shadow-cast** | 7 × 49 | sapphire, mauve, red, green, peach | Block letters with a two-row offset drop shadow that fades from ▒ to ░. |
+| **wide** | 5 × 52 | lavender, sky, teal, mauve, sapphire | Block letters with extra inter-letter spacing for a more open layout. |
+| **triple-line** | 5 × 59 | red, peach, yellow, green, mauve | Block letters with 3-cell-wide strokes — bolder than the canonical 2-cell block. |
+| **tall** | 10 × 47 | sapphire, blue, lavender, mauve, sky | Block letters vertically stretched — each row of the canonical block doubled. |
+| **mirror-flip** | 10 × 47 | teal, sapphire, sky, blue, lavender | Block letters with a vertically-flipped ░ reflection below — water-reflection feel. |
+| **stripe** | 5 × 47 | peach, red, yellow, mauve, lavender | Block letters with alternating row densities — bars in █, verticals in ▒. |
+| **boxed** | 7 × 49 | lavender, sky, sapphire, mauve, blue | Block letters surrounded by a ░ rectangular frame. |
+| **checkered** | 5 × 47 | yellow, peach, green, red, mauve | Block letters with a fine █/▓ checkerboard pattern within letter shapes. |
 
 ## Auto-fitting
 
 When the screensaver runs in random-logo mode, it filters the
 catalog to variants whose dimensions fit the current canvas (with
 a 1-cell margin). On a tiny terminal that can't fit any of the
-larger variants, it falls back to the **mini** variant. So the
-animation always has SHEDOS to render — never a blank canvas.
+larger variants, it falls back to whichever variant has the
+fewest columns in the current catalog. So the animation always
+has SHEDOS to render — never a blank canvas.
 
 ## Customizing
 

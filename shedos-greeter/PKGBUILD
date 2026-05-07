@@ -21,6 +21,7 @@ depends=(
     'ttf-jetbrains-mono-nerd' # clock + branding font
     'greetd'                  # we are its [default_session].command
     'shedos-branding'         # /usr/share/shedos/wallpapers/dusk*.png
+    'shedos-system'           # /usr/lib/shedos/start-hyprland-session.sh
 )
 
 makedepends=(

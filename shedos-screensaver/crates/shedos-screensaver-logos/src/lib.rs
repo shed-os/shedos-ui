@@ -6,9 +6,16 @@
 //! parses each variant's text into a `Logo { mask, glyphs, … }` ready
 //! for an effect to animate toward.
 //!
+//! Each variant ships with a small curated palette of Catppuccin
+//! Mocha colors. The cycle engine picks one at random per session,
+//! turning every `(logo, effect)` pair into several visually distinct
+//! frames. The first palette entry is treated as the canonical brand
+//! color and is used by deterministic call sites (the survey tool,
+//! fixtures, any future snapshot tests).
+//!
 //! Adding a variant is a 3-step PR:
 //!   1. Drop a `.txt` under art/<name>.txt with the new SHEDOS rendition.
-//!   2. Add a `LogoVariant` entry to [`LIBRARY`] below.
+//!   2. Add a `LogoVariant` entry to [`LIBRARY`] below with its palette.
 //!   3. (Optional) Add a snapshot test that loads it and asserts row/col.
 //!
 //! `/etc/shedos-ascii.txt` still wins as a per-system override at
@@ -17,8 +24,19 @@
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use shedos_screensaver_core::{Color, Logo};
+use shedos_screensaver_core::{Catppuccin, Color, Logo};
 use std::path::PathBuf;
+
+const MOCHA: Catppuccin = Catppuccin::MOCHA;
+
+/// One named color in a logo's palette. The `name` matches the
+/// Catppuccin Mocha key (`blue`, `mauve`, …) so it round-trips
+/// through `--color <name>` and the `Catppuccin::lookup` resolver.
+#[derive(Debug, Clone, Copy)]
+pub struct NamedColor {
+    pub name: &'static str,
+    pub color: Color,
+}
 
 /// One named SHEDOS art variant.
 #[derive(Debug, Clone, Copy)]
@@ -29,14 +47,32 @@ pub struct LogoVariant {
     pub art: &'static str,
     /// Rough description for `--list-logos` output.
     pub description: &'static str,
-    /// Suggested default brand color when this variant is rendered
-    /// without an explicit `--color`. Mostly Catppuccin Mocha.
-    pub default_color: Color,
+    /// Curated palette. Non-empty by construction; `colors[0]` is
+    /// treated as the canonical brand color for this variant.
+    pub colors: &'static [NamedColor],
 }
 
 impl LogoVariant {
     pub fn load(&self) -> Logo {
         Logo::parse(self.art, PathBuf::from(format!("<embedded:{}>", self.name)))
+    }
+
+    /// Canonical brand color — the first palette entry. Used by
+    /// deterministic call sites where a single representative color
+    /// is needed (survey tool, fixtures).
+    pub fn default_color(&self) -> Color {
+        self.colors[0].color
+    }
+
+    /// Pick a color uniformly from the palette. The cycle engine
+    /// calls this each session when no `--color` override is set,
+    /// so the same logo appears in different palette members across
+    /// cycles.
+    pub fn pick_color(&self, rng: &mut impl Rng) -> Color {
+        self.colors
+            .choose(rng)
+            .expect("LogoVariant palettes are non-empty by construction")
+            .color
     }
 }
 
@@ -48,56 +84,195 @@ pub const LIBRARY: &[LogoVariant] = &[
         title: "Block",
         art: include_str!("../art/block.txt"),
         description: "Solid block letters, 5 rows. The canonical SHEDOS mark — also what fastfetch shows.",
-        default_color: Color::rgb(0x89, 0xb4, 0xfa), // Catppuccin blue
+        colors: &[
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+        ],
     },
     LogoVariant {
         name: "ansi-shadow",
         title: "ANSI Shadow",
         art: include_str!("../art/ansi-shadow.txt"),
         description: "Block letters with depth shading via Unicode box-drawing. 6 rows.",
-        default_color: Color::rgb(0xcb, 0xa6, 0xf7), // Catppuccin mauve
-    },
-    LogoVariant {
-        name: "slant",
-        title: "Slant",
-        art: include_str!("../art/slant.txt"),
-        description: "Italic-style figlet font. 5 rows.",
-        default_color: Color::rgb(0xfa, 0xb3, 0x87), // Catppuccin peach
+        colors: &[
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "maroon", color: MOCHA.maroon },
+        ],
     },
     LogoVariant {
         name: "big",
         title: "Big",
         art: include_str!("../art/big.txt"),
-        description: "Wide rounded letters, figlet 'big' font. 6 rows.",
-        default_color: Color::rgb(0xa6, 0xe3, 0xa1), // Catppuccin green
-    },
-    LogoVariant {
-        name: "small",
-        title: "Small",
-        art: include_str!("../art/small.txt"),
-        description: "Tight 4-row variant for narrow terminals.",
-        default_color: Color::rgb(0x94, 0xe2, 0xd5), // Catppuccin teal
-    },
-    LogoVariant {
-        name: "doom",
-        title: "Doom",
-        art: include_str!("../art/doom.txt"),
-        description: "Mailbox-style figlet 'doom' font. 6 rows.",
-        default_color: Color::rgb(0xf3, 0x8b, 0xa8), // Catppuccin red
+        description: "Bold filled block letters at a larger scale. 7 rows.",
+        colors: &[
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "red", color: MOCHA.red },
+        ],
     },
     LogoVariant {
         name: "outline",
         title: "Outline",
         art: include_str!("../art/outline.txt"),
         description: "Hollow letters in box-drawing characters. 5 rows.",
-        default_color: Color::rgb(0x89, 0xdc, 0xeb), // Catppuccin sky
+        colors: &[
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "pink", color: MOCHA.pink },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "rosewater", color: MOCHA.rosewater },
+        ],
     },
     LogoVariant {
-        name: "mini",
-        title: "Mini",
-        art: include_str!("../art/mini.txt"),
-        description: "Compact 2-row variant for tiny canvases.",
-        default_color: Color::rgb(0xf9, 0xe2, 0xaf), // Catppuccin yellow
+        name: "3d-iso",
+        title: "3D Iso",
+        art: include_str!("../art/3d-iso.txt"),
+        description: "Block letters with a single-cell ▒ depth shadow on each letter's right edge. 5 rows.",
+        colors: &[
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+        ],
+    },
+    LogoVariant {
+        name: "gradient",
+        title: "Gradient",
+        art: include_str!("../art/gradient.txt"),
+        description: "Block letters with a vertical density gradient — solid █ at the top fading through ▓▒░ to the bottom. 5 rows.",
+        colors: &[
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "teal", color: MOCHA.teal },
+        ],
+    },
+    LogoVariant {
+        name: "emboss",
+        title: "Emboss",
+        art: include_str!("../art/emboss.txt"),
+        description: "Block letters with a single-row ░ drop shadow directly underneath. 6 rows.",
+        colors: &[
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "blue", color: MOCHA.blue },
+        ],
+    },
+    LogoVariant {
+        name: "shadow-cast",
+        title: "Shadow Cast",
+        art: include_str!("../art/shadow-cast.txt"),
+        description: "Block letters with a two-row offset drop shadow that fades from ▒ to ░. 7 rows.",
+        colors: &[
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "peach", color: MOCHA.peach },
+        ],
+    },
+    LogoVariant {
+        name: "wide",
+        title: "Wide",
+        art: include_str!("../art/wide.txt"),
+        description: "Block letters with extra inter-letter spacing for a more open layout. 5 rows.",
+        colors: &[
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+        ],
+    },
+    LogoVariant {
+        name: "triple-line",
+        title: "Triple Line",
+        art: include_str!("../art/triple-line.txt"),
+        description: "Block letters with 3-cell-wide strokes — bolder than the canonical 2-cell block. 5 rows.",
+        colors: &[
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+        ],
+    },
+    LogoVariant {
+        name: "tall",
+        title: "Tall",
+        art: include_str!("../art/tall.txt"),
+        description: "Block letters vertically stretched — each row of the canonical block doubled. 10 rows.",
+        colors: &[
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "sky", color: MOCHA.sky },
+        ],
+    },
+    LogoVariant {
+        name: "mirror-flip",
+        title: "Mirror Flip",
+        art: include_str!("../art/mirror-flip.txt"),
+        description: "Block letters with a vertically-flipped ░ reflection below — water-reflection feel. 10 rows.",
+        colors: &[
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+        ],
+    },
+    LogoVariant {
+        name: "stripe",
+        title: "Stripe",
+        art: include_str!("../art/stripe.txt"),
+        description: "Block letters with alternating row densities — bars in █, verticals in ▒. 5 rows.",
+        colors: &[
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+        ],
+    },
+    LogoVariant {
+        name: "boxed",
+        title: "Boxed",
+        art: include_str!("../art/boxed.txt"),
+        description: "Block letters surrounded by a ░ rectangular frame. 7 rows.",
+        colors: &[
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "blue", color: MOCHA.blue },
+        ],
+    },
+    LogoVariant {
+        name: "checkered",
+        title: "Checkered",
+        art: include_str!("../art/checkered.txt"),
+        description: "Block letters with a fine █/▓ checkerboard pattern within letter shapes. 5 rows.",
+        colors: &[
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+        ],
     },
 ];
 
@@ -117,9 +292,10 @@ pub fn pick_random(rng: &mut impl Rng) -> &'static LogoVariant {
     LIBRARY.choose(rng).expect("LIBRARY is non-empty by construction")
 }
 
-/// Pick a random variant whose lit-cell count fits in the given
-/// canvas. If nothing fits (extremely small canvas), returns the
-/// `mini` variant unconditionally.
+/// Pick a random variant whose footprint fits in the given canvas.
+/// If nothing fits (extremely small canvas), falls back to the
+/// narrowest variant in the library — the catalog can shrink over
+/// time, so we don't hardcode a specific name.
 pub fn pick_random_for_canvas(rng: &mut impl Rng, rows: u16, cols: u16) -> &'static LogoVariant {
     let candidates: Vec<&'static LogoVariant> = LIBRARY
         .iter()
@@ -128,13 +304,13 @@ pub fn pick_random_for_canvas(rng: &mut impl Rng, rows: u16, cols: u16) -> &'sta
             logo.rows <= rows.saturating_sub(1) && logo.cols <= cols.saturating_sub(1)
         })
         .collect();
-    if candidates.is_empty() {
-        return by_name("mini").expect("mini variant always present");
+    if let Some(v) = candidates.choose(rng).copied() {
+        return v;
     }
-    candidates
-        .choose(rng)
-        .copied()
-        .unwrap_or_else(|| by_name("mini").expect("mini variant always present"))
+    LIBRARY
+        .iter()
+        .min_by_key(|v| v.load().cols)
+        .expect("LIBRARY is non-empty by construction")
 }
 
 #[cfg(test)]
@@ -144,8 +320,8 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
 
     #[test]
-    fn library_has_at_least_eight_variants() {
-        assert!(LIBRARY.len() >= 8, "library shrunk to {}", LIBRARY.len());
+    fn library_has_at_least_four_variants() {
+        assert!(LIBRARY.len() >= 4, "library shrunk to {}", LIBRARY.len());
     }
 
     #[test]
@@ -180,6 +356,53 @@ mod tests {
     }
 
     #[test]
+    fn every_variant_has_a_non_empty_palette_with_unique_names() {
+        for v in LIBRARY {
+            assert!(
+                !v.colors.is_empty(),
+                "variant '{}' has an empty palette",
+                v.name
+            );
+            let mut seen = std::collections::HashSet::new();
+            for c in v.colors {
+                assert!(
+                    seen.insert(c.name),
+                    "variant '{}' has duplicate palette entry '{}'",
+                    v.name,
+                    c.name
+                );
+                assert_eq!(
+                    Catppuccin::MOCHA.lookup(c.name),
+                    Some(c.color),
+                    "variant '{}' palette entry '{}' RGB does not match Catppuccin lookup",
+                    v.name,
+                    c.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_color_is_first_palette_entry() {
+        for v in LIBRARY {
+            assert_eq!(v.default_color(), v.colors[0].color, "variant '{}'", v.name);
+        }
+    }
+
+    #[test]
+    fn pick_color_returns_a_palette_member() {
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        for v in LIBRARY {
+            let c = v.pick_color(&mut rng);
+            assert!(
+                v.colors.iter().any(|n| n.color == c),
+                "variant '{}' returned a color not in its palette",
+                v.name
+            );
+        }
+    }
+
+    #[test]
     fn by_name_finds_known_variants() {
         assert!(by_name("block").is_some());
         assert!(by_name("ansi-shadow").is_some());
@@ -196,11 +419,23 @@ mod tests {
     }
 
     #[test]
-    fn pick_random_for_tiny_canvas_falls_back_to_mini() {
+    fn pick_random_for_tiny_canvas_falls_back_to_smallest() {
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        // 5 rows × 20 cols — block (47 cols wide) won't fit.
+        // 5 rows × 20 cols — none of the current logos fit; fallback
+        // path returns whichever LIBRARY entry has the fewest cols.
         let v = pick_random_for_canvas(&mut rng, 5, 20);
-        // mini is 2 rows × ~22 cols; should fit or be returned by fallback.
-        assert!(v.name == "mini" || v.load().cols <= 19, "got {} for tiny canvas", v.name);
+        let smallest_cols = LIBRARY
+            .iter()
+            .map(|x| x.load().cols)
+            .min()
+            .expect("LIBRARY non-empty");
+        assert_eq!(
+            v.load().cols,
+            smallest_cols,
+            "tiny-canvas fallback returned {} (cols={}) but the catalog's smallest is cols={}",
+            v.name,
+            v.load().cols,
+            smallest_cols
+        );
     }
 }

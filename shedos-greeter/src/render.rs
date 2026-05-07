@@ -53,6 +53,23 @@ const BLUE: (u8, u8, u8) = (0x89, 0xb4, 0xfa);
 const BASE: (u8, u8, u8) = (0x1e, 0x1e, 0x2e);
 const RED: (u8, u8, u8) = (0xf3, 0x8b, 0xa8);
 
+// On multi-monitor setups cage gives us one toplevel surface that
+// spans every output. Without per-output awareness the UI lands at
+// the canvas centre — i.e. the seam between two screens. We instead
+// pick the topleft-most output as "primary", render the UI inside
+// its rect, and dim the rest of the canvas.
+const NON_PRIMARY_DIM: f32 = 0.35;
+
+/// One output's rectangle within the spanned canvas.
+#[derive(Clone, Copy, Debug)]
+struct OutputRect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    is_primary: bool,
+}
+
 const ERROR_HOLD: Duration = Duration::from_secs(2);
 const ERROR_TEXT: &str = "Authentication Failed";
 
@@ -123,6 +140,7 @@ pub fn run(wallpaper_path: &Path) -> Result<()> {
         bold,
         keyboard: None,
         size: None,
+        outputs: Vec::new(),
         username,
         password: String::new(),
         error_text: String::new(),
@@ -156,6 +174,10 @@ struct App {
     bold: FontFace,
     keyboard: Option<WlKeyboard>,
     size: Option<(u32, u32)>,
+    /// Cached output rects, refreshed on every output state change.
+    /// Empty until the first output is announced. The topleft-most
+    /// entry is flagged as primary.
+    outputs: Vec<OutputRect>,
     username: Option<String>,
     password: String,
     /// Error message to render below the input box during the
@@ -168,6 +190,47 @@ struct App {
 }
 
 impl App {
+    /// Rebuild `self.outputs` from the current OutputState. Called
+    /// from each OutputHandler hook (announce, update, destroy).
+    /// Falls back to wl_output::geometry coords + the preferred
+    /// mode when xdg-output isn't advertised.
+    fn refresh_outputs(&mut self) {
+        let mut outs: Vec<OutputRect> = Vec::new();
+        for output in self.output_state.outputs() {
+            let Some(info) = self.output_state.info(&output) else {
+                continue;
+            };
+            let (x, y) = info.logical_position.unwrap_or(info.location);
+            let (w, h) = info.logical_size.unwrap_or_else(|| {
+                let mode = info
+                    .modes
+                    .iter()
+                    .find(|m| m.preferred)
+                    .or_else(|| info.modes.first());
+                let (mw, mh) = mode.map(|m| m.dimensions).unwrap_or((1920, 1080));
+                let s = info.scale_factor.max(1);
+                (mw / s, mh / s)
+            });
+            outs.push(OutputRect { x, y, w, h, is_primary: false });
+        }
+        outs.sort_by_key(|o| (o.x, o.y));
+        if let Some(first) = outs.first_mut() {
+            first.is_primary = true;
+        }
+        self.outputs = outs;
+    }
+
+    /// Pick the rect to centre the UI inside. Falls back to the
+    /// whole canvas when no outputs are known yet (first configure
+    /// before the output state is populated).
+    fn primary_rect(&self, canvas_w: u32, canvas_h: u32) -> (i32, i32, i32, i32) {
+        if let Some(p) = self.outputs.iter().find(|o| o.is_primary) {
+            (p.x, p.y, p.w, p.h)
+        } else {
+            (0, 0, canvas_w as i32, canvas_h as i32)
+        }
+    }
+
     fn submit(&mut self) {
         let Some(username) = self.username.clone() else {
             log::warn!("submit: no username configured (set /etc/shedos/login-user)");
@@ -175,16 +238,10 @@ impl App {
             return;
         };
         let password = std::mem::take(&mut self.password);
-        let cmd = vec![
-            "/usr/bin/uwsm".to_string(),
-            "start".to_string(),
-            "-g".to_string(),
-            "-1".to_string(),
-            "-e".to_string(),
-            "-D".to_string(),
-            "Hyprland".to_string(),
-            "hyprland.desktop".to_string(),
-        ];
+        // Wrapper redirects uwsm + Hyprland stdout/stderr into journald
+        // so the post-auth gap doesn't flash text on the framebuffer
+        // console. Logs surface via `journalctl -t hyprland-session`.
+        let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
         match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
             Ok(()) => {
                 log::info!("auth + start_session OK; greeter exiting for {}", username);
@@ -220,6 +277,16 @@ impl App {
             }
             None => false,
         };
+
+        // Snapshot per-output state before the buffer borrow makes
+        // self.outputs / self.primary_rect unborrowable.
+        let (px, py, pw, ph) = self.primary_rect(w, h);
+        let dim_rects: Vec<OutputRect> = self
+            .outputs
+            .iter()
+            .filter(|o| !o.is_primary)
+            .copied()
+            .collect();
 
         let stride = (w * 4) as i32;
         let total = (w as usize) * (h as usize) * 4;
@@ -257,29 +324,34 @@ impl App {
         let cached_bgra = &self.wallpaper_cache.as_ref().expect("just populated").2;
         canvas[..cached_bgra.len()].copy_from_slice(cached_bgra);
 
+        // Dim every non-primary output's region. Single-monitor → no-op.
+        for out in &dim_rects {
+            dim_rect(canvas, w, h, out.x, out.y, out.w, out.h, NON_PRIMARY_DIM);
+        }
+
         let now = chrono::Local::now();
         let clock = now.format("%H:%M").to_string();
         let date = now.format("%A, %B %-d").to_string();
         let brand = "ShedOS";
 
-        // Clock at ~30% from top.
+        // Clock at ~30% from the top of the primary output.
         let clock_w = self.regular.measure_width(&clock, CLOCK_PX);
-        let clock_x = (w as i32 - clock_w) / 2;
-        let clock_y = (h as f32 * 0.30) as i32;
+        let clock_x = px + (pw - clock_w) / 2;
+        let clock_y = py + (ph as f32 * 0.30) as i32;
         self.regular
             .render(&clock, CLOCK_PX, clock_x, clock_y, TEXT, 0xff, canvas, w, h);
 
         // Date just under the clock.
         let date_w = self.regular.measure_width(&date, DATE_PX);
-        let date_x = (w as i32 - date_w) / 2;
+        let date_x = px + (pw - date_w) / 2;
         let date_y = clock_y + (CLOCK_PX as i32 / 4);
         self.regular
             .render(&date, DATE_PX, date_x, date_y, TEXT, 0xcc, canvas, w, h);
 
-        // Password input box centered ~58% from top.
+        // Password input box centered ~58% from top of primary output.
         let border_color = if error { RED } else { BLUE };
-        let box_x = (w as i32 - INPUT_W as i32) / 2;
-        let box_y = (h as f32 * 0.58) as i32;
+        let box_x = px + (pw - INPUT_W as i32) / 2;
+        let box_y = py + (ph as f32 * 0.58) as i32;
         draw_rounded_box(
             canvas,
             w,
@@ -325,7 +397,7 @@ impl App {
                 self.error_text.as_str()
             };
             let err_w = self.regular.measure_width(msg, GREET_PX);
-            let err_x = (w as i32 - err_w) / 2;
+            let err_x = px + (pw - err_w) / 2;
             self.regular
                 .render(msg, GREET_PX, err_x, line_y, RED, 0xff, canvas, w, h);
         } else {
@@ -334,15 +406,15 @@ impl App {
                 None => "Hi".to_string(),
             };
             let greet_w = self.regular.measure_width(&greet, GREET_PX);
-            let greet_x = (w as i32 - greet_w) / 2;
+            let greet_x = px + (pw - greet_w) / 2;
             self.regular
                 .render(&greet, GREET_PX, greet_x, line_y, BLUE, 0xff, canvas, w, h);
         }
 
-        // Branding bottom center.
+        // Branding near bottom of the primary output.
         let brand_w = self.bold.measure_width(brand, BRAND_PX);
-        let brand_x = (w as i32 - brand_w) / 2;
-        let brand_y = (h as f32 * 0.93) as i32;
+        let brand_x = px + (pw - brand_w) / 2;
+        let brand_y = py + (ph as f32 * 0.93) as i32;
         self.bold
             .render(brand, BRAND_PX, brand_x, brand_y, BLUE, 0x99, canvas, w, h);
 
@@ -350,6 +422,35 @@ impl App {
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
         surface.damage_buffer(0, 0, w as i32, h as i32);
         surface.commit();
+    }
+}
+
+/// Multiply the BGR channels of every pixel inside the rect by
+/// `factor` (clamped 0.0..=1.0). 1.0 = unchanged; 0.0 = full black.
+/// Used to darken non-primary outputs while leaving the primary's
+/// wallpaper at full brightness.
+#[allow(clippy::too_many_arguments)]
+fn dim_rect(canvas: &mut [u8], cw: u32, ch: u32, x: i32, y: i32, w: i32, h: i32, factor: f32) {
+    let f = (factor.clamp(0.0, 1.0) * 256.0) as u32;
+    for dy in 0..h {
+        let py = y + dy;
+        if py < 0 || (py as u32) >= ch {
+            continue;
+        }
+        let row = (py as u32) * cw * 4;
+        for dx in 0..w {
+            let pxc = x + dx;
+            if pxc < 0 || (pxc as u32) >= cw {
+                continue;
+            }
+            let idx = (row + (pxc as u32) * 4) as usize;
+            if idx + 3 >= canvas.len() {
+                continue;
+            }
+            canvas[idx] = ((canvas[idx] as u32 * f) >> 8) as u8;
+            canvas[idx + 1] = ((canvas[idx + 1] as u32 * f) >> 8) as u8;
+            canvas[idx + 2] = ((canvas[idx + 2] as u32 * f) >> 8) as u8;
+        }
     }
 }
 
@@ -654,9 +755,17 @@ impl OutputHandler for App {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
     }
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.refresh_outputs();
+        self.draw();
+    }
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.refresh_outputs();
+        self.draw();
+    }
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        self.refresh_outputs();
+        self.draw();
     }
 }
 

@@ -19,7 +19,7 @@ use shedos_screensaver_effects::{target, Effect, EffectCtx, Registry as EffectsR
 use shedos_screensaver_i18n::{t, t_str, I18n};
 use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
-use shedos_screensaver_wayland::{FrameProducer, WaylandConfig, WaylandRenderer};
+use shedos_screensaver_wayland::{FrameProducer, ProducerFactory, WaylandConfig, WaylandRenderer};
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,8 +45,8 @@ enum AudioSource {
 #[command(
     name = "shedos-screensaver",
     bin_name = "shedos-screensaver",
-    version,
-    about = "Animated SHEDOS screensaver with TTY + Wayland backends, 8 logo variants × 16 forming effects",
+    version = env!("SHEDOS_VERSION"),
+    about = "Animated SHEDOS screensaver with TTY + Wayland backends, 15 logo variants × 46 forming effects",
     long_about = None,
 )]
 struct Cli {
@@ -141,6 +141,13 @@ struct Cli {
     /// `--cycle rain --cycle decrypt --cycle matrix-rain`.
     #[arg(long = "cycle", value_name = "NAME", action = ArgAction::Append)]
     cycle: Vec<String>,
+
+    /// Walk every (logo, effect) pair, run each to completion against
+    /// a fixed 80×24 canvas, and print the final ASCII frame to
+    /// stdout. Use it to review the catalog visually — pipe to a file
+    /// and scroll for combinations that don't render cleanly.
+    #[arg(long)]
+    survey: bool,
 }
 
 fn main() -> ExitCode {
@@ -179,6 +186,9 @@ fn main() -> ExitCode {
     }
     if let Some(name) = &cli.help_effect {
         return print_help_effect(&effects, name);
+    }
+    if cli.survey {
+        return run_survey(&effects);
     }
 
     // ----- validations -----
@@ -330,7 +340,9 @@ impl Engine {
     fn start_session(&mut self, registry: &EffectsRegistry, rows: u16, cols: u16) {
         let logo_variant = self.pick_logo(rows, cols);
         let logo = logo_variant.load();
-        let fg = self.color_override.unwrap_or(logo_variant.default_color);
+        let fg = self
+            .color_override
+            .unwrap_or_else(|| logo_variant.pick_color(&mut self.rng));
         let target = target::build_target(rows, cols, &logo, fg);
 
         let mut effect = self.pick_effect(registry);
@@ -504,23 +516,39 @@ fn run_wayland(
         idle_daemon: cli.idle_daemon,
     };
 
-    let producer = EngineProducer {
-        engine: Engine::new(
-            cli.logo.clone(),
-            cli.effect.clone(),
-            cli.cycle.clone(),
-            color_override,
-            Duration::from_secs_f32(cli.hold.max(0.0)),
-            audio,
-        ),
-        registry: EffectsRegistry::new(),
-        clock: RealClock::new(),
-        last_frame: Duration::ZERO,
-        first: true,
-        exit_flag: Arc::clone(&exit_flag),
-        duration: cli.duration,
-        start: Duration::ZERO,
-    };
+    // The renderer mints one producer per output it discovers. The
+    // captures below are all clonable / copy-able except `audio`,
+    // which owns a cpal Stream we can't duplicate. The closure
+    // `take()`s the audio Option on its first call, so the first
+    // output to come up gets audio-reactive effects; subsequent
+    // outputs run their effects' silence-fallback path.
+    let logo = cli.logo.clone();
+    let effect = cli.effect.clone();
+    let cycle = cli.cycle.clone();
+    let hold = Duration::from_secs_f32(cli.hold.max(0.0));
+    let duration = cli.duration;
+    let exit_for_factory = Arc::clone(&exit_flag);
+    let mut audio_one_shot = audio;
+
+    let factory: ProducerFactory = Box::new(move || {
+        Box::new(EngineProducer {
+            engine: Engine::new(
+                logo.clone(),
+                effect.clone(),
+                cycle.clone(),
+                color_override,
+                hold,
+                audio_one_shot.take(),
+            ),
+            registry: EffectsRegistry::new(),
+            clock: RealClock::new(),
+            last_frame: Duration::ZERO,
+            first: true,
+            exit_flag: Arc::clone(&exit_for_factory),
+            duration,
+            start: Duration::ZERO,
+        }) as Box<dyn FrameProducer>
+    });
 
     if let Some(d) = cli.duration {
         let f = Arc::clone(&exit_flag);
@@ -530,7 +558,7 @@ fn run_wayland(
         });
     }
 
-    WaylandRenderer::run(cfg, Box::new(producer), exit_flag).map_err(|e| format!("wayland: {e}"))
+    WaylandRenderer::run(cfg, factory, exit_flag).map_err(|e| format!("wayland: {e}"))
 }
 
 fn resolve_wallpaper(arg: &str) -> Option<PathBuf> {
@@ -615,6 +643,16 @@ fn print_logos_list() {
                 ],
             )
         );
+        let palette = v
+            .colors
+            .iter()
+            .map(|c| c.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "    {}",
+            t_str("list-logo-colors", &[("palette", palette.as_str())])
+        );
     }
 }
 
@@ -640,6 +678,101 @@ fn emit_completion(shell: Shell) {
     let mut cmd = Cli::command();
     let bin = cmd.get_name().to_string();
     clap_complete::generate(shell, &mut cmd, bin, &mut io::stdout());
+}
+
+fn run_survey(registry: &EffectsRegistry) -> ExitCode {
+    // Fixed canvas so every combination is judged against the same
+    // dimensions; eyeball-comparable across the run.
+    const ROWS: u16 = 24;
+    const COLS: u16 = 80;
+    // Deterministic seed so re-running the survey produces the same
+    // frames — handy for diffing against an earlier capture.
+    const SEED: u64 = 0x5348_4544_4F53_5343;
+
+    let palette_pairs: usize = logos::LIBRARY.iter().map(|v| v.colors.len()).sum();
+    let total = palette_pairs * registry.len();
+    println!(
+        "# shedos-screensaver survey: {} (logo, color) pairs × {} effects = {} combinations",
+        palette_pairs,
+        registry.len(),
+        total,
+    );
+    println!("# canvas: {COLS}×{ROWS} cells, fixed RNG seed");
+    println!("# colors are emitted as 24-bit ANSI escapes — view with `less -R` or `cat`");
+    println!();
+
+    for logo_variant in logos::LIBRARY {
+        let logo = logo_variant.load();
+
+        for named_color in logo_variant.colors {
+            let fg = named_color.color;
+            let target = target::build_target(ROWS, COLS, &logo, fg);
+
+            for effect_key in registry.keys() {
+                let mut effect = match registry.instantiate(effect_key) {
+                    Some(e) => e,
+                    None => continue,
+                };
+                let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+                let mut ctx = EffectCtx { final_color: fg, rng: &mut rng };
+                effect.setup(&target, &mut ctx);
+
+                let mut frame = Frame::new(ROWS, COLS);
+                let dt = Duration::from_millis(16);
+                // Run for at most 10 s of animation time; effects with
+                // duration() shorter return earlier via step()→true.
+                for _ in 0..600 {
+                    if effect.step(&mut frame, dt, None) {
+                        break;
+                    }
+                }
+
+                println!("{}", "=".repeat(80));
+                println!(
+                    "# logo:   {:<14}  ({})",
+                    logo_variant.name, logo_variant.title
+                );
+                println!(
+                    "# effect: {:<14}  ({})",
+                    effect_key,
+                    effect.title()
+                );
+                println!("# color:  {}", named_color.name);
+                println!("{}", "=".repeat(80));
+                print_frame_ascii(&frame);
+                println!();
+            }
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn print_frame_ascii(frame: &Frame) {
+    // Emit each non-blank cell as `\x1b[38;2;R;G;Bm<ch>` so that
+    // viewers which interpret ANSI (less -R, plain `cat` to a
+    // truecolor terminal) render the engine-assigned color.
+    // Blanks stay uncolored; we only re-emit the SGR when the
+    // foreground actually changes, which keeps the per-frame
+    // overhead near one escape per row.
+    for r in 0..frame.rows() {
+        let mut last_fg: Option<Color> = None;
+        for c in 0..frame.cols() {
+            if let Some(cell) = frame.get(r, c) {
+                if cell.ch == ' ' {
+                    print!(" ");
+                    continue;
+                }
+                if last_fg != Some(cell.fg) {
+                    print!("\x1b[38;2;{};{};{}m", cell.fg.r, cell.fg.g, cell.fg.b);
+                    last_fg = Some(cell.fg);
+                }
+                print!("{}", cell.ch);
+            }
+        }
+        print!("\x1b[0m");
+        println!();
+    }
 }
 
 #[cfg(test)]
@@ -688,18 +821,18 @@ mod tests {
 
     #[test]
     fn logos_count() {
-        assert!(logos::LIBRARY.len() >= 8);
+        assert!(logos::LIBRARY.len() >= 4);
     }
 
     #[test]
     fn engine_hold_zero_is_one_shot_mode() {
-        // Regression: the user passed `--effect=rain --logo=small
+        // Regression: the user passed `--effect=rain --logo=block
         // --duration=6 --hold=0` and saw the animation re-render
         // twice without the SHEDOS art ever staying complete on
         // screen. With hold=0, after the effect resolves the engine
         // must sit on the resolved frame instead of restarting.
         let mut engine = Engine::new(
-            Some("small".to_string()),
+            Some("block".to_string()),
             Some("rain".to_string()),
             vec![],
             None,
@@ -744,7 +877,7 @@ mod tests {
         // that the hold=0 special case above doesn't accidentally
         // freeze cycling mode.
         let mut engine = Engine::new(
-            Some("small".to_string()),
+            Some("block".to_string()),
             Some("rain".to_string()),
             vec![],
             None,

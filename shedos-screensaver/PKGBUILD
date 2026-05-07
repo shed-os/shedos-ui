@@ -47,7 +47,12 @@ build() {
     # `--frozen` enforces the vendored Cargo.lock; drop it for the
     # first time the lockfile is generated, then re-add. CI uses
     # --frozen to catch unexpected dep updates.
-    cargo build --release --locked --workspace
+    #
+    # SHEDOS_VERSION is read by crates/shedos-screensaver-cli/build.rs
+    # so the binary's `--version` reports the package's CalVer
+    # (pkgver-pkgrel) rather than the internal SemVer in Cargo.toml.
+    SHEDOS_VERSION="${pkgver}-${pkgrel}" \
+        cargo build --release --locked --workspace
 }
 
 check() {
