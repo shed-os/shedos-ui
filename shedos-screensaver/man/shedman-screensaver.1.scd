@@ -23,9 +23,12 @@ The same binary backs both surfaces — pass *--mode=tty* or
 *--mode=wayland* to force one. Default *--mode=auto* picks Wayland
 when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
-Four SHEDOS art variants ship in the catalog (block, ansi-shadow,
-big, outline). Twenty-six effects ship in the registry.
-With both axes random, that's 104 visually distinct sessions.
+Twelve SHEDOS art variants ship in the catalog (block, ansi-shadow,
+big, outline, 3d-iso, gradient, emboss, shadow-cast, wide,
+triple-line, tall, mirror-flip). Forty-one effects ship in the
+registry. Each variant carries a five-color Catppuccin Mocha
+palette picked uniformly per session, so a random run draws from
+12 × 5 × 41 = 2460 visually distinct sessions.
 
 # READ-ONLY OPTIONS
 
@@ -281,11 +284,12 @@ catalog with durations.
 
 # LOGO VARIANTS
 
-Nine SHEDOS art variants. Run *shedos-screensaver --list-logos*
+Twelve SHEDOS art variants. Run *shedos-screensaver --list-logos*
 for descriptions.
 
 *block*, *ansi-shadow*, *big*, *outline*, *3d-iso*, *gradient*,
-*emboss*, *shadow-cast*, *wide*
+*emboss*, *shadow-cast*, *wide*, *triple-line*, *tall*,
+*mirror-flip*
 
 # CONFIGURATION
 

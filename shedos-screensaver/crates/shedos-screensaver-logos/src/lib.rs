@@ -196,6 +196,45 @@ pub const LIBRARY: &[LogoVariant] = &[
             NamedColor { name: "sapphire", color: MOCHA.sapphire },
         ],
     },
+    LogoVariant {
+        name: "triple-line",
+        title: "Triple Line",
+        art: include_str!("../art/triple-line.txt"),
+        description: "Block letters with 3-cell-wide strokes — bolder than the canonical 2-cell block. 5 rows.",
+        colors: &[
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+        ],
+    },
+    LogoVariant {
+        name: "tall",
+        title: "Tall",
+        art: include_str!("../art/tall.txt"),
+        description: "Block letters vertically stretched — each row of the canonical block doubled. 10 rows.",
+        colors: &[
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "sky", color: MOCHA.sky },
+        ],
+    },
+    LogoVariant {
+        name: "mirror-flip",
+        title: "Mirror Flip",
+        art: include_str!("../art/mirror-flip.txt"),
+        description: "Block letters with a vertically-flipped ░ reflection below — water-reflection feel. 10 rows.",
+        colors: &[
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+        ],
+    },
 ];
 
 /// Look up a variant by name. None if no variant matches.

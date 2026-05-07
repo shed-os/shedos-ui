@@ -1,6 +1,6 @@
 # shedos-screensaver logo variants
 
-Nine SHEDOS art variants ship in the binary's catalog. Each is a
+Twelve SHEDOS art variants ship in the binary's catalog. Each is a
 different "font" rendition of the SHEDOS mark. Each cycle of the
 screensaver picks one (random by default; `--logo=NAME` locks to
 one).
@@ -24,6 +24,9 @@ Mocha key, plus `#rrggbb`, `r,g,b`, and named ANSI all work).
 | **emboss** | 6 × 47 | red, peach, yellow, green, blue | Block letters with a single-row ░ drop shadow directly underneath. |
 | **shadow-cast** | 7 × 49 | sapphire, mauve, red, green, peach | Block letters with a two-row offset drop shadow that fades from ▒ to ░. |
 | **wide** | 5 × 52 | lavender, sky, teal, mauve, sapphire | Block letters with extra inter-letter spacing for a more open layout. |
+| **triple-line** | 5 × 59 | red, peach, yellow, green, mauve | Block letters with 3-cell-wide strokes — bolder than the canonical 2-cell block. |
+| **tall** | 10 × 47 | sapphire, blue, lavender, mauve, sky | Block letters vertically stretched — each row of the canonical block doubled. |
+| **mirror-flip** | 10 × 47 | teal, sapphire, sky, blue, lavender | Block letters with a vertically-flipped ░ reflection below — water-reflection feel. |
 
 ## Auto-fitting
 
