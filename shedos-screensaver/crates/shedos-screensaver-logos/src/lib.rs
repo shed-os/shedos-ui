@@ -131,6 +131,71 @@ pub const LIBRARY: &[LogoVariant] = &[
             NamedColor { name: "rosewater", color: MOCHA.rosewater },
         ],
     },
+    LogoVariant {
+        name: "3d-iso",
+        title: "3D Iso",
+        art: include_str!("../art/3d-iso.txt"),
+        description: "Block letters with a single-cell ▒ depth shadow on each letter's right edge. 5 rows.",
+        colors: &[
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+        ],
+    },
+    LogoVariant {
+        name: "gradient",
+        title: "Gradient",
+        art: include_str!("../art/gradient.txt"),
+        description: "Block letters with a vertical density gradient — solid █ at the top fading through ▓▒░ to the bottom. 5 rows.",
+        colors: &[
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "teal", color: MOCHA.teal },
+        ],
+    },
+    LogoVariant {
+        name: "emboss",
+        title: "Emboss",
+        art: include_str!("../art/emboss.txt"),
+        description: "Block letters with a single-row ░ drop shadow directly underneath. 6 rows.",
+        colors: &[
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "blue", color: MOCHA.blue },
+        ],
+    },
+    LogoVariant {
+        name: "shadow-cast",
+        title: "Shadow Cast",
+        art: include_str!("../art/shadow-cast.txt"),
+        description: "Block letters with a two-row offset drop shadow that fades from ▒ to ░. 7 rows.",
+        colors: &[
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "red", color: MOCHA.red },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "peach", color: MOCHA.peach },
+        ],
+    },
+    LogoVariant {
+        name: "wide",
+        title: "Wide",
+        art: include_str!("../art/wide.txt"),
+        description: "Block letters with extra inter-letter spacing for a more open layout. 5 rows.",
+        colors: &[
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+        ],
+    },
 ];
 
 /// Look up a variant by name. None if no variant matches.

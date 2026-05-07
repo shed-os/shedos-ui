@@ -281,10 +281,11 @@ catalog with durations.
 
 # LOGO VARIANTS
 
-Four SHEDOS art variants. Run *shedos-screensaver --list-logos*
+Nine SHEDOS art variants. Run *shedos-screensaver --list-logos*
 for descriptions.
 
-*block*, *ansi-shadow*, *big*, *outline*
+*block*, *ansi-shadow*, *big*, *outline*, *3d-iso*, *gradient*,
+*emboss*, *shadow-cast*, *wide*
 
 # CONFIGURATION
 

@@ -14,7 +14,8 @@
 effect = ""
 
 # Lock to a specific logo variant, or empty for "random each cycle".
-# One of: block, ansi-shadow, big, outline.
+# One of: block, ansi-shadow, big, outline, 3d-iso, gradient,
+# emboss, shadow-cast, wide.
 # Run `shedos-screensaver --list-logos`.
 logo = ""
 
