@@ -58,32 +58,11 @@ pub const LIBRARY: &[LogoVariant] = &[
         default_color: Color::rgb(0xcb, 0xa6, 0xf7), // Catppuccin mauve
     },
     LogoVariant {
-        name: "slant",
-        title: "Slant",
-        art: include_str!("../art/slant.txt"),
-        description: "Italic-style figlet font. 5 rows.",
-        default_color: Color::rgb(0xfa, 0xb3, 0x87), // Catppuccin peach
-    },
-    LogoVariant {
         name: "big",
         title: "Big",
         art: include_str!("../art/big.txt"),
-        description: "Wide rounded letters, figlet 'big' font. 6 rows.",
+        description: "Bold filled block letters at a larger scale. 7 rows.",
         default_color: Color::rgb(0xa6, 0xe3, 0xa1), // Catppuccin green
-    },
-    LogoVariant {
-        name: "small",
-        title: "Small",
-        art: include_str!("../art/small.txt"),
-        description: "Tight 4-row variant for narrow terminals.",
-        default_color: Color::rgb(0x94, 0xe2, 0xd5), // Catppuccin teal
-    },
-    LogoVariant {
-        name: "doom",
-        title: "Doom",
-        art: include_str!("../art/doom.txt"),
-        description: "Mailbox-style figlet 'doom' font. 6 rows.",
-        default_color: Color::rgb(0xf3, 0x8b, 0xa8), // Catppuccin red
     },
     LogoVariant {
         name: "outline",
@@ -91,13 +70,6 @@ pub const LIBRARY: &[LogoVariant] = &[
         art: include_str!("../art/outline.txt"),
         description: "Hollow letters in box-drawing characters. 5 rows.",
         default_color: Color::rgb(0x89, 0xdc, 0xeb), // Catppuccin sky
-    },
-    LogoVariant {
-        name: "mini",
-        title: "Mini",
-        art: include_str!("../art/mini.txt"),
-        description: "Compact 2-row variant for tiny canvases.",
-        default_color: Color::rgb(0xf9, 0xe2, 0xaf), // Catppuccin yellow
     },
 ];
 
@@ -117,9 +89,10 @@ pub fn pick_random(rng: &mut impl Rng) -> &'static LogoVariant {
     LIBRARY.choose(rng).expect("LIBRARY is non-empty by construction")
 }
 
-/// Pick a random variant whose lit-cell count fits in the given
-/// canvas. If nothing fits (extremely small canvas), returns the
-/// `mini` variant unconditionally.
+/// Pick a random variant whose footprint fits in the given canvas.
+/// If nothing fits (extremely small canvas), falls back to the
+/// narrowest variant in the library — the catalog can shrink over
+/// time, so we don't hardcode a specific name.
 pub fn pick_random_for_canvas(rng: &mut impl Rng, rows: u16, cols: u16) -> &'static LogoVariant {
     let candidates: Vec<&'static LogoVariant> = LIBRARY
         .iter()
@@ -128,13 +101,13 @@ pub fn pick_random_for_canvas(rng: &mut impl Rng, rows: u16, cols: u16) -> &'sta
             logo.rows <= rows.saturating_sub(1) && logo.cols <= cols.saturating_sub(1)
         })
         .collect();
-    if candidates.is_empty() {
-        return by_name("mini").expect("mini variant always present");
+    if let Some(v) = candidates.choose(rng).copied() {
+        return v;
     }
-    candidates
-        .choose(rng)
-        .copied()
-        .unwrap_or_else(|| by_name("mini").expect("mini variant always present"))
+    LIBRARY
+        .iter()
+        .min_by_key(|v| v.load().cols)
+        .expect("LIBRARY is non-empty by construction")
 }
 
 #[cfg(test)]
@@ -144,8 +117,8 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
 
     #[test]
-    fn library_has_at_least_eight_variants() {
-        assert!(LIBRARY.len() >= 8, "library shrunk to {}", LIBRARY.len());
+    fn library_has_at_least_four_variants() {
+        assert!(LIBRARY.len() >= 4, "library shrunk to {}", LIBRARY.len());
     }
 
     #[test]
@@ -196,11 +169,23 @@ mod tests {
     }
 
     #[test]
-    fn pick_random_for_tiny_canvas_falls_back_to_mini() {
+    fn pick_random_for_tiny_canvas_falls_back_to_smallest() {
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        // 5 rows × 20 cols — block (47 cols wide) won't fit.
+        // 5 rows × 20 cols — none of the current logos fit; fallback
+        // path returns whichever LIBRARY entry has the fewest cols.
         let v = pick_random_for_canvas(&mut rng, 5, 20);
-        // mini is 2 rows × ~22 cols; should fit or be returned by fallback.
-        assert!(v.name == "mini" || v.load().cols <= 19, "got {} for tiny canvas", v.name);
+        let smallest_cols = LIBRARY
+            .iter()
+            .map(|x| x.load().cols)
+            .min()
+            .expect("LIBRARY non-empty");
+        assert_eq!(
+            v.load().cols,
+            smallest_cols,
+            "tiny-canvas fallback returned {} (cols={}) but the catalog's smallest is cols={}",
+            v.name,
+            v.load().cols,
+            smallest_cols
+        );
     }
 }

@@ -787,18 +787,18 @@ mod tests {
 
     #[test]
     fn logos_count() {
-        assert!(logos::LIBRARY.len() >= 8);
+        assert!(logos::LIBRARY.len() >= 4);
     }
 
     #[test]
     fn engine_hold_zero_is_one_shot_mode() {
-        // Regression: the user passed `--effect=rain --logo=small
+        // Regression: the user passed `--effect=rain --logo=block
         // --duration=6 --hold=0` and saw the animation re-render
         // twice without the SHEDOS art ever staying complete on
         // screen. With hold=0, after the effect resolves the engine
         // must sit on the resolved frame instead of restarting.
         let mut engine = Engine::new(
-            Some("small".to_string()),
+            Some("block".to_string()),
             Some("rain".to_string()),
             vec![],
             None,
@@ -843,7 +843,7 @@ mod tests {
         // that the hold=0 special case above doesn't accidentally
         // freeze cycling mode.
         let mut engine = Engine::new(
-            Some("small".to_string()),
+            Some("block".to_string()),
             Some("rain".to_string()),
             vec![],
             None,
