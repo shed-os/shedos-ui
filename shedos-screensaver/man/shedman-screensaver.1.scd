@@ -115,7 +115,7 @@ With both axes random, that's 104 visually distinct sessions.
 
 # EFFECTS
 
-The 31 ship effects. Run *shedos-screensaver --list* for the live
+The 36 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 
 *rain*
@@ -235,6 +235,27 @@ catalog with durations.
 	A clockwise spiral arm sweeps inward from canvas perimeter to
 	center; cells reveal at canonical positions as the arm passes
 	their (angle, radius).
+
+*snowstorm*
+	Snowflakes drift down with gentle horizontal sway; each flake
+	sticks to its assigned SHEDOS cell on arrival.
+
+*fountain*
+	Particles spray upward from a center point at the canvas
+	bottom, arc outward under gravity, and land at SHEDOS cell
+	positions.
+
+*ember-rise*
+	Glowing embers float upward from below with flickering
+	brightness; settle into the SHEDOS shape from bottom up.
+
+*dust-settle*
+	Dust motes swirl chaotically with decaying amplitude;
+	crystallize into the SHEDOS shape as the swirl damps to zero.
+
+*firework*
+	Three burst points emit colored sparks that drift along
+	parabolic arcs to SHEDOS cells.
 
 # LOGO VARIANTS
 

@@ -46,6 +46,11 @@ impl Registry {
                 ("echo-fade",        || Box::new(effects::echo_fade::EchoFade::new())),
                 ("fault-line",       || Box::new(effects::fault_line::FaultLine::new())),
                 ("vortex",           || Box::new(effects::vortex::Vortex::new())),
+                ("snowstorm",        || Box::new(effects::snowstorm::Snowstorm::new())),
+                ("fountain",         || Box::new(effects::fountain::Fountain::new())),
+                ("ember-rise",       || Box::new(effects::ember_rise::EmberRise::new())),
+                ("dust-settle",      || Box::new(effects::dust_settle::DustSettle::new())),
+                ("firework",         || Box::new(effects::firework::Firework::new())),
             ],
         }
     }
