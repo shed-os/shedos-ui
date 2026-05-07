@@ -19,7 +19,7 @@ use shedos_screensaver_effects::{target, Effect, EffectCtx, Registry as EffectsR
 use shedos_screensaver_i18n::{t, t_str, I18n};
 use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
-use shedos_screensaver_wayland::{FrameProducer, WaylandConfig, WaylandRenderer};
+use shedos_screensaver_wayland::{FrameProducer, ProducerFactory, WaylandConfig, WaylandRenderer};
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -504,23 +504,39 @@ fn run_wayland(
         idle_daemon: cli.idle_daemon,
     };
 
-    let producer = EngineProducer {
-        engine: Engine::new(
-            cli.logo.clone(),
-            cli.effect.clone(),
-            cli.cycle.clone(),
-            color_override,
-            Duration::from_secs_f32(cli.hold.max(0.0)),
-            audio,
-        ),
-        registry: EffectsRegistry::new(),
-        clock: RealClock::new(),
-        last_frame: Duration::ZERO,
-        first: true,
-        exit_flag: Arc::clone(&exit_flag),
-        duration: cli.duration,
-        start: Duration::ZERO,
-    };
+    // The renderer mints one producer per output it discovers. The
+    // captures below are all clonable / copy-able except `audio`,
+    // which owns a cpal Stream we can't duplicate. The closure
+    // `take()`s the audio Option on its first call, so the first
+    // output to come up gets audio-reactive effects; subsequent
+    // outputs run their effects' silence-fallback path.
+    let logo = cli.logo.clone();
+    let effect = cli.effect.clone();
+    let cycle = cli.cycle.clone();
+    let hold = Duration::from_secs_f32(cli.hold.max(0.0));
+    let duration = cli.duration;
+    let exit_for_factory = Arc::clone(&exit_flag);
+    let mut audio_one_shot = audio;
+
+    let factory: ProducerFactory = Box::new(move || {
+        Box::new(EngineProducer {
+            engine: Engine::new(
+                logo.clone(),
+                effect.clone(),
+                cycle.clone(),
+                color_override,
+                hold,
+                audio_one_shot.take(),
+            ),
+            registry: EffectsRegistry::new(),
+            clock: RealClock::new(),
+            last_frame: Duration::ZERO,
+            first: true,
+            exit_flag: Arc::clone(&exit_for_factory),
+            duration,
+            start: Duration::ZERO,
+        }) as Box<dyn FrameProducer>
+    });
 
     if let Some(d) = cli.duration {
         let f = Arc::clone(&exit_flag);
@@ -530,7 +546,7 @@ fn run_wayland(
         });
     }
 
-    WaylandRenderer::run(cfg, Box::new(producer), exit_flag).map_err(|e| format!("wayland: {e}"))
+    WaylandRenderer::run(cfg, factory, exit_flag).map_err(|e| format!("wayland: {e}"))
 }
 
 fn resolve_wallpaper(arg: &str) -> Option<PathBuf> {

@@ -20,7 +20,7 @@ mod surface;
 mod wallpaper;
 
 pub use font::FontAtlas;
-pub use surface::WaylandRenderer;
+pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
 use shedos_screensaver_core::{Color, Frame};
