@@ -6,9 +6,16 @@
 //! parses each variant's text into a `Logo { mask, glyphs, … }` ready
 //! for an effect to animate toward.
 //!
+//! Each variant ships with a small curated palette of Catppuccin
+//! Mocha colors. The cycle engine picks one at random per session,
+//! turning every `(logo, effect)` pair into several visually distinct
+//! frames. The first palette entry is treated as the canonical brand
+//! color and is used by deterministic call sites (the survey tool,
+//! fixtures, any future snapshot tests).
+//!
 //! Adding a variant is a 3-step PR:
 //!   1. Drop a `.txt` under art/<name>.txt with the new SHEDOS rendition.
-//!   2. Add a `LogoVariant` entry to [`LIBRARY`] below.
+//!   2. Add a `LogoVariant` entry to [`LIBRARY`] below with its palette.
 //!   3. (Optional) Add a snapshot test that loads it and asserts row/col.
 //!
 //! `/etc/shedos-ascii.txt` still wins as a per-system override at
@@ -17,8 +24,19 @@
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use shedos_screensaver_core::{Color, Logo};
+use shedos_screensaver_core::{Catppuccin, Color, Logo};
 use std::path::PathBuf;
+
+const MOCHA: Catppuccin = Catppuccin::MOCHA;
+
+/// One named color in a logo's palette. The `name` matches the
+/// Catppuccin Mocha key (`blue`, `mauve`, …) so it round-trips
+/// through `--color <name>` and the `Catppuccin::lookup` resolver.
+#[derive(Debug, Clone, Copy)]
+pub struct NamedColor {
+    pub name: &'static str,
+    pub color: Color,
+}
 
 /// One named SHEDOS art variant.
 #[derive(Debug, Clone, Copy)]
@@ -29,14 +47,32 @@ pub struct LogoVariant {
     pub art: &'static str,
     /// Rough description for `--list-logos` output.
     pub description: &'static str,
-    /// Suggested default brand color when this variant is rendered
-    /// without an explicit `--color`. Mostly Catppuccin Mocha.
-    pub default_color: Color,
+    /// Curated palette. Non-empty by construction; `colors[0]` is
+    /// treated as the canonical brand color for this variant.
+    pub colors: &'static [NamedColor],
 }
 
 impl LogoVariant {
     pub fn load(&self) -> Logo {
         Logo::parse(self.art, PathBuf::from(format!("<embedded:{}>", self.name)))
+    }
+
+    /// Canonical brand color — the first palette entry. Used by
+    /// deterministic call sites where a single representative color
+    /// is needed (survey tool, fixtures).
+    pub fn default_color(&self) -> Color {
+        self.colors[0].color
+    }
+
+    /// Pick a color uniformly from the palette. The cycle engine
+    /// calls this each session when no `--color` override is set,
+    /// so the same logo appears in different palette members across
+    /// cycles.
+    pub fn pick_color(&self, rng: &mut impl Rng) -> Color {
+        self.colors
+            .choose(rng)
+            .expect("LogoVariant palettes are non-empty by construction")
+            .color
     }
 }
 
@@ -48,28 +84,52 @@ pub const LIBRARY: &[LogoVariant] = &[
         title: "Block",
         art: include_str!("../art/block.txt"),
         description: "Solid block letters, 5 rows. The canonical SHEDOS mark — also what fastfetch shows.",
-        default_color: Color::rgb(0x89, 0xb4, 0xfa), // Catppuccin blue
+        colors: &[
+            NamedColor { name: "blue", color: MOCHA.blue },
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+        ],
     },
     LogoVariant {
         name: "ansi-shadow",
         title: "ANSI Shadow",
         art: include_str!("../art/ansi-shadow.txt"),
         description: "Block letters with depth shading via Unicode box-drawing. 6 rows.",
-        default_color: Color::rgb(0xcb, 0xa6, 0xf7), // Catppuccin mauve
+        colors: &[
+            NamedColor { name: "mauve", color: MOCHA.mauve },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "sapphire", color: MOCHA.sapphire },
+            NamedColor { name: "maroon", color: MOCHA.maroon },
+        ],
     },
     LogoVariant {
         name: "big",
         title: "Big",
         art: include_str!("../art/big.txt"),
         description: "Bold filled block letters at a larger scale. 7 rows.",
-        default_color: Color::rgb(0xa6, 0xe3, 0xa1), // Catppuccin green
+        colors: &[
+            NamedColor { name: "green", color: MOCHA.green },
+            NamedColor { name: "yellow", color: MOCHA.yellow },
+            NamedColor { name: "peach", color: MOCHA.peach },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "red", color: MOCHA.red },
+        ],
     },
     LogoVariant {
         name: "outline",
         title: "Outline",
         art: include_str!("../art/outline.txt"),
         description: "Hollow letters in box-drawing characters. 5 rows.",
-        default_color: Color::rgb(0x89, 0xdc, 0xeb), // Catppuccin sky
+        colors: &[
+            NamedColor { name: "sky", color: MOCHA.sky },
+            NamedColor { name: "lavender", color: MOCHA.lavender },
+            NamedColor { name: "pink", color: MOCHA.pink },
+            NamedColor { name: "teal", color: MOCHA.teal },
+            NamedColor { name: "rosewater", color: MOCHA.rosewater },
+        ],
     },
 ];
 
@@ -148,6 +208,53 @@ mod tests {
                 "variant '{}' has only {} lit cells; check art file",
                 v.name,
                 logo.lit_count()
+            );
+        }
+    }
+
+    #[test]
+    fn every_variant_has_a_non_empty_palette_with_unique_names() {
+        for v in LIBRARY {
+            assert!(
+                !v.colors.is_empty(),
+                "variant '{}' has an empty palette",
+                v.name
+            );
+            let mut seen = std::collections::HashSet::new();
+            for c in v.colors {
+                assert!(
+                    seen.insert(c.name),
+                    "variant '{}' has duplicate palette entry '{}'",
+                    v.name,
+                    c.name
+                );
+                assert_eq!(
+                    Catppuccin::MOCHA.lookup(c.name),
+                    Some(c.color),
+                    "variant '{}' palette entry '{}' RGB does not match Catppuccin lookup",
+                    v.name,
+                    c.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_color_is_first_palette_entry() {
+        for v in LIBRARY {
+            assert_eq!(v.default_color(), v.colors[0].color, "variant '{}'", v.name);
+        }
+    }
+
+    #[test]
+    fn pick_color_returns_a_palette_member() {
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        for v in LIBRARY {
+            let c = v.pick_color(&mut rng);
+            assert!(
+                v.colors.iter().any(|n| n.color == c),
+                "variant '{}' returned a color not in its palette",
+                v.name
             );
         }
     }

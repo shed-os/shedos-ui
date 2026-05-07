@@ -24,8 +24,8 @@ The same binary backs both surfaces — pass *--mode=tty* or
 when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
 
 Four SHEDOS art variants ship in the catalog (block, ansi-shadow,
-big, outline). Twenty-six effects ship in the registry. With
-both axes random, that's 104 visually distinct sessions.
+big, outline). Twenty-six effects ship in the registry.
+With both axes random, that's 104 visually distinct sessions.
 
 # READ-ONLY OPTIONS
 

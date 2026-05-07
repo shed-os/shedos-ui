@@ -62,13 +62,6 @@ struct Cli {
     #[arg(long)]
     list_logos: bool,
 
-    /// Walk every (logo, effect) pair, run each to completion against
-    /// a fixed 80×24 canvas with a deterministic RNG seed, and print
-    /// the settled frame to stdout. Pipe to a file and scroll for
-    /// combinations that don't render cleanly.
-    #[arg(long)]
-    survey: bool,
-
     /// Print the description of a specific effect.
     #[arg(long, value_name = "NAME")]
     help_effect: Option<String>,
@@ -148,6 +141,13 @@ struct Cli {
     /// `--cycle rain --cycle decrypt --cycle matrix-rain`.
     #[arg(long = "cycle", value_name = "NAME", action = ArgAction::Append)]
     cycle: Vec<String>,
+
+    /// Walk every (logo, effect) pair, run each to completion against
+    /// a fixed 80×24 canvas, and print the final ASCII frame to
+    /// stdout. Use it to review the catalog visually — pipe to a file
+    /// and scroll for combinations that don't render cleanly.
+    #[arg(long)]
+    survey: bool,
 }
 
 fn main() -> ExitCode {
@@ -184,11 +184,11 @@ fn main() -> ExitCode {
         print_logos_list();
         return ExitCode::SUCCESS;
     }
-    if cli.survey {
-        return run_survey(&effects);
-    }
     if let Some(name) = &cli.help_effect {
         return print_help_effect(&effects, name);
+    }
+    if cli.survey {
+        return run_survey(&effects);
     }
 
     // ----- validations -----
@@ -340,7 +340,9 @@ impl Engine {
     fn start_session(&mut self, registry: &EffectsRegistry, rows: u16, cols: u16) {
         let logo_variant = self.pick_logo(rows, cols);
         let logo = logo_variant.load();
-        let fg = self.color_override.unwrap_or(logo_variant.default_color);
+        let fg = self
+            .color_override
+            .unwrap_or_else(|| logo_variant.pick_color(&mut self.rng));
         let target = target::build_target(rows, cols, &logo, fg);
 
         let mut effect = self.pick_effect(registry);
@@ -641,6 +643,16 @@ fn print_logos_list() {
                 ],
             )
         );
+        let palette = v
+            .colors
+            .iter()
+            .map(|c| c.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "    {}",
+            t_str("list-logo-colors", &[("palette", palette.as_str())])
+        );
     }
 }
 
@@ -677,53 +689,59 @@ fn run_survey(registry: &EffectsRegistry) -> ExitCode {
     // frames — handy for diffing against an earlier capture.
     const SEED: u64 = 0x5348_4544_4F53_5343;
 
-    let total = logos::LIBRARY.len() * registry.len();
+    let palette_pairs: usize = logos::LIBRARY.iter().map(|v| v.colors.len()).sum();
+    let total = palette_pairs * registry.len();
     println!(
-        "# shedos-screensaver survey: {} logos × {} effects = {} combinations",
-        logos::LIBRARY.len(),
+        "# shedos-screensaver survey: {} (logo, color) pairs × {} effects = {} combinations",
+        palette_pairs,
         registry.len(),
         total,
     );
     println!("# canvas: {COLS}×{ROWS} cells, fixed RNG seed");
+    println!("# colors are emitted as 24-bit ANSI escapes — view with `less -R` or `cat`");
     println!();
 
     for logo_variant in logos::LIBRARY {
         let logo = logo_variant.load();
-        let fg = logo_variant.default_color;
-        let target = target::build_target(ROWS, COLS, &logo, fg);
 
-        for effect_key in registry.keys() {
-            let mut effect = match registry.instantiate(effect_key) {
-                Some(e) => e,
-                None => continue,
-            };
-            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
-            let mut ctx = EffectCtx { final_color: fg, rng: &mut rng };
-            effect.setup(&target, &mut ctx);
+        for named_color in logo_variant.colors {
+            let fg = named_color.color;
+            let target = target::build_target(ROWS, COLS, &logo, fg);
 
-            let mut frame = Frame::new(ROWS, COLS);
-            let dt = Duration::from_millis(16);
-            // Run for at most 10 s of animation time; effects with
-            // duration() shorter return earlier via step()→true.
-            for _ in 0..600 {
-                if effect.step(&mut frame, dt, None) {
-                    break;
+            for effect_key in registry.keys() {
+                let mut effect = match registry.instantiate(effect_key) {
+                    Some(e) => e,
+                    None => continue,
+                };
+                let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+                let mut ctx = EffectCtx { final_color: fg, rng: &mut rng };
+                effect.setup(&target, &mut ctx);
+
+                let mut frame = Frame::new(ROWS, COLS);
+                let dt = Duration::from_millis(16);
+                // Run for at most 10 s of animation time; effects with
+                // duration() shorter return earlier via step()→true.
+                for _ in 0..600 {
+                    if effect.step(&mut frame, dt, None) {
+                        break;
+                    }
                 }
-            }
 
-            println!("{}", "=".repeat(80));
-            println!(
-                "# logo:   {:<14}  ({})",
-                logo_variant.name, logo_variant.title
-            );
-            println!(
-                "# effect: {:<14}  ({})",
-                effect_key,
-                effect.title()
-            );
-            println!("{}", "=".repeat(80));
-            print_frame_ascii(&frame);
-            println!();
+                println!("{}", "=".repeat(80));
+                println!(
+                    "# logo:   {:<14}  ({})",
+                    logo_variant.name, logo_variant.title
+                );
+                println!(
+                    "# effect: {:<14}  ({})",
+                    effect_key,
+                    effect.title()
+                );
+                println!("# color:  {}", named_color.name);
+                println!("{}", "=".repeat(80));
+                print_frame_ascii(&frame);
+                println!();
+            }
         }
     }
 
@@ -731,12 +749,28 @@ fn run_survey(registry: &EffectsRegistry) -> ExitCode {
 }
 
 fn print_frame_ascii(frame: &Frame) {
+    // Emit each non-blank cell as `\x1b[38;2;R;G;Bm<ch>` so that
+    // viewers which interpret ANSI (less -R, plain `cat` to a
+    // truecolor terminal) render the engine-assigned color.
+    // Blanks stay uncolored; we only re-emit the SGR when the
+    // foreground actually changes, which keeps the per-frame
+    // overhead near one escape per row.
     for r in 0..frame.rows() {
+        let mut last_fg: Option<Color> = None;
         for c in 0..frame.cols() {
             if let Some(cell) = frame.get(r, c) {
+                if cell.ch == ' ' {
+                    print!(" ");
+                    continue;
+                }
+                if last_fg != Some(cell.fg) {
+                    print!("\x1b[38;2;{};{};{}m", cell.fg.r, cell.fg.g, cell.fg.b);
+                    last_fg = Some(cell.fg);
+                }
                 print!("{}", cell.ch);
             }
         }
+        print!("\x1b[0m");
         println!();
     }
 }

@@ -7,12 +7,18 @@ one).
 
 Run `shedos-screensaver --list-logos` for the live catalog.
 
-| Variant | Rows × Cols | Default color | Notes |
+Each variant ships with a curated palette of Catppuccin Mocha
+colors. The cycle engine picks one at random per session, so the
+same logo appears in different palette members across cycles.
+Pass `--color <name>` to lock to a specific color (any Catppuccin
+Mocha key, plus `#rrggbb`, `r,g,b`, and named ANSI all work).
+
+| Variant | Rows × Cols | Palette (first = canonical) | Notes |
 |---|---|---|---|
-| **block** | 5 × 47 | Catppuccin blue | Solid block letters. The canonical mark — also fastfetch's logo. |
-| **ansi-shadow** | 6 × 49 | Catppuccin mauve | Block letters with depth shading via Unicode box-drawing. |
-| **big** | 7 × 58 | Catppuccin green | Bold filled block letters at a larger scale. |
-| **outline** | 5 × 35 | Catppuccin sky | Hollow letters in box-drawing characters. |
+| **block** | 5 × 47 | blue, mauve, green, peach, sapphire | Solid block letters. The canonical mark — also fastfetch's logo. |
+| **ansi-shadow** | 6 × 49 | mauve, lavender, sky, sapphire, maroon | Block letters with depth shading via Unicode box-drawing. |
+| **big** | 7 × 58 | green, yellow, peach, teal, red | Bold filled block letters at a larger scale. |
+| **outline** | 5 × 35 | sky, lavender, pink, teal, rosewater | Hollow letters in box-drawing characters. |
 
 ## Auto-fitting
 
