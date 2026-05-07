@@ -62,6 +62,13 @@ struct Cli {
     #[arg(long)]
     list_logos: bool,
 
+    /// Walk every (logo, effect) pair, run each to completion against
+    /// a fixed 80×24 canvas with a deterministic RNG seed, and print
+    /// the settled frame to stdout. Pipe to a file and scroll for
+    /// combinations that don't render cleanly.
+    #[arg(long)]
+    survey: bool,
+
     /// Print the description of a specific effect.
     #[arg(long, value_name = "NAME")]
     help_effect: Option<String>,
@@ -176,6 +183,9 @@ fn main() -> ExitCode {
     if cli.list_logos {
         print_logos_list();
         return ExitCode::SUCCESS;
+    }
+    if cli.survey {
+        return run_survey(&effects);
     }
     if let Some(name) = &cli.help_effect {
         return print_help_effect(&effects, name);
@@ -656,6 +666,79 @@ fn emit_completion(shell: Shell) {
     let mut cmd = Cli::command();
     let bin = cmd.get_name().to_string();
     clap_complete::generate(shell, &mut cmd, bin, &mut io::stdout());
+}
+
+fn run_survey(registry: &EffectsRegistry) -> ExitCode {
+    // Fixed canvas so every combination is judged against the same
+    // dimensions; eyeball-comparable across the run.
+    const ROWS: u16 = 24;
+    const COLS: u16 = 80;
+    // Deterministic seed so re-running the survey produces the same
+    // frames — handy for diffing against an earlier capture.
+    const SEED: u64 = 0x5348_4544_4F53_5343;
+
+    let total = logos::LIBRARY.len() * registry.len();
+    println!(
+        "# shedos-screensaver survey: {} logos × {} effects = {} combinations",
+        logos::LIBRARY.len(),
+        registry.len(),
+        total,
+    );
+    println!("# canvas: {COLS}×{ROWS} cells, fixed RNG seed");
+    println!();
+
+    for logo_variant in logos::LIBRARY {
+        let logo = logo_variant.load();
+        let fg = logo_variant.default_color;
+        let target = target::build_target(ROWS, COLS, &logo, fg);
+
+        for effect_key in registry.keys() {
+            let mut effect = match registry.instantiate(effect_key) {
+                Some(e) => e,
+                None => continue,
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+            let mut ctx = EffectCtx { final_color: fg, rng: &mut rng };
+            effect.setup(&target, &mut ctx);
+
+            let mut frame = Frame::new(ROWS, COLS);
+            let dt = Duration::from_millis(16);
+            // Run for at most 10 s of animation time; effects with
+            // duration() shorter return earlier via step()→true.
+            for _ in 0..600 {
+                if effect.step(&mut frame, dt, None) {
+                    break;
+                }
+            }
+
+            println!("{}", "=".repeat(80));
+            println!(
+                "# logo:   {:<14}  ({})",
+                logo_variant.name, logo_variant.title
+            );
+            println!(
+                "# effect: {:<14}  ({})",
+                effect_key,
+                effect.title()
+            );
+            println!("{}", "=".repeat(80));
+            print_frame_ascii(&frame);
+            println!();
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn print_frame_ascii(frame: &Frame) {
+    for r in 0..frame.rows() {
+        for c in 0..frame.cols() {
+            if let Some(cell) = frame.get(r, c) {
+                print!("{}", cell.ch);
+            }
+        }
+        println!();
+    }
 }
 
 #[cfg(test)]
