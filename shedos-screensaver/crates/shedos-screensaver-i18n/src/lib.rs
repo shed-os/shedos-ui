@@ -33,7 +33,14 @@ impl I18n {
     pub fn init(explicit: Option<&str>) -> Result<LanguageIdentifier, I18nError> {
         let lang = resolve_locale(explicit);
         let primary = build_bundle_for(&lang)?;
-        let fallback = build_bundle_for(&langid!("en-US"))?;
+        // The fallback is the compile-time embedded en-US catalog,
+        // never the on-disk one. This guarantees that a key newly
+        // added to the embedded copy resolves even when the
+        // installed /usr/share/locale/en/.../shedos-screensaver.ftl
+        // is older (e.g. between a binary upgrade and a package
+        // upgrade). Without this, a stale on-disk en-US would
+        // shadow new keys and force them to render as bare ids.
+        let fallback = build_embedded_bundle()?;
         let i18n = I18n { primary, fallback };
         let _ = BUNDLE.set(RwLock::new(i18n));
         Ok(lang)
@@ -82,6 +89,17 @@ fn build_bundle_for(lang: &LanguageIdentifier) -> Result<FluentBundle<FluentReso
     let source = load_source_for(lang).unwrap_or_else(|| EN_US_FTL.to_string());
     let res = FluentResource::try_new(source).map_err(|(_, errs)| I18nError::Parse(format!("{errs:?}")))?;
     bundle.add_resource(res).map_err(|errs| I18nError::AddResource(format!("{errs:?}")))?;
+    Ok(bundle)
+}
+
+fn build_embedded_bundle() -> Result<FluentBundle<FluentResource>, I18nError> {
+    let mut bundle = FluentBundle::new_concurrent(vec![langid!("en-US")]);
+    bundle.set_use_isolating(false);
+    let res = FluentResource::try_new(EN_US_FTL.to_string())
+        .map_err(|(_, errs)| I18nError::Parse(format!("{errs:?}")))?;
+    bundle
+        .add_resource(res)
+        .map_err(|errs| I18nError::AddResource(format!("{errs:?}")))?;
     Ok(bundle)
 }
 
