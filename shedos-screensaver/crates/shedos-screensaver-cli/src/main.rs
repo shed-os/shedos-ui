@@ -45,8 +45,8 @@ enum AudioSource {
 #[command(
     name = "shedos-screensaver",
     bin_name = "shedos-screensaver",
-    version,
-    about = "Animated SHEDOS screensaver with TTY + Wayland backends, 8 logo variants × 16 forming effects",
+    version = env!("SHEDOS_VERSION"),
+    about = "Animated SHEDOS screensaver with TTY + Wayland backends, 15 logo variants × 46 forming effects",
     long_about = None,
 )]
 struct Cli {
