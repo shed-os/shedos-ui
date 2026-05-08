@@ -1,0 +1,17 @@
+[package]
+name = "shedos-prompt-ui"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Shared prompt-surface rendering for ShedOS lock surfaces (greeter, screensaver lock)"
+repository = "https://github.com/theshedman/shedos"
+publish = false
+
+[lib]
+name = "shedos_prompt_ui"
+path = "src/lib.rs"
+
+[dependencies]
+# Phase 0.2 fills these in (image, fontdue, chrono, tomlkit-equivalent
+# for greeter.toml parsing). Keeping the scaffold dep-free lets Phase
+# 0.1 land with no transitive deps to audit.
