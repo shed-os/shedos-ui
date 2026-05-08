@@ -2,34 +2,34 @@ shedos-greeter(1)
 
 # NAME
 
-shedos-greeter - greetd greeter that mirrors the hyprlock visual
+shedos-greeter - greetd greeter for ShedOS
 
 # SYNOPSIS
 
-*shedos-greeter* [_wallpaper-path_]
+*shedos-greeter*
 
 # DESCRIPTION
 
 *shedos-greeter* is the ShedOS greetd greeter. It renders a fullscreen
-wlr-layer-shell surface with a wallpaper background, the current clock
-and date, a password input box, and a "Hi, _username_" greeting. On
+xdg-shell surface with a wallpaper background, the current clock and
+date, a password input box, and a "Hi, _username_" greeting. On
 Enter, it submits the typed password to greetd via the JSON-over-Unix-
 socket IPC protocol (greetd validates server-side via PAM as root,
 before any user environment exists). On success, greetd execs the
 chosen session command for the authenticated user. On failure, the
-greeter renders a red-bordered input + "Authentication Failed" line
-for two seconds, then accepts a fresh password attempt.
+greeter renders a red-bordered input + the PAM error string for two
+seconds, then accepts a fresh password attempt.
 
-The greeter takes no GTK widgets and renders every pixel itself, so
-backgrounds, fonts, and chrome can be matched bit-for-bit to the
-ShedOS hyprlock screen.
+All pixel composition (wallpaper blit, clock, prompt input, branding)
+is delegated to the *shedos-prompt-ui* library so the greeter stays
+visually identical to the lock screen. On multi-monitor setups, the
+full UI is mirrored on every output (no dimming).
 
-# OPTIONS
-
-_wallpaper-path_
-	Optional positional argument. Path to the wallpaper image
-	(PNG or JPEG). Defaults to
-	_/usr/share/shedos/wallpapers/dusk-blurred.png_.
+The greeter takes no GTK widgets and renders every pixel itself.
+Wallpaper, fonts, and palette come from the theme reconciler at
+_/etc/shedos/themes/current/_; the greeter listens for atomic theme
+swaps via inotify and picks up new colors / wallpaper on the next
+frame, without restart.
 
 # ENVIRONMENT
 
@@ -57,8 +57,21 @@ _/etc/shedos/login-user_
 	1000..65534 with a real shell) from _/etc/passwd_. ShedOS
 	is single-user by design.
 
+_/etc/shedos/themes/current/greeter.toml_
+	Active theme palette + font selections + wallpaper paths,
+	written atomically by the theme reconciler. Missing or
+	corrupt → the greeter falls back per-field to bundled
+	Catppuccin Mocha defaults.
+
+_/etc/shedos/themes/current/wallpaper-blurred.png_
+	Blurred wallpaper composed into the greeter background. The
+	desktop daemon (*awww*(1)) consumes the sharp companion at
+	_wallpaper.png_.
+
 _/usr/share/shedos/wallpapers/_
-	Default wallpaper search path. Provided by *shedos-branding*.
+	Bundled wallpapers (sharp + blurred) shipped by
+	*shedos-branding*. Used as the fallback source when no
+	theme is applied.
 
 # EXIT STATUS
 
@@ -67,10 +80,10 @@ _/usr/share/shedos/wallpapers/_
 	will now exec the user's session.
 
 *non-zero*
-	A panic, missing Wayland connection, missing wallpaper, or
-	other startup failure. greetd will normally relaunch the
-	greeter on a non-zero exit.
+	A panic, missing Wayland connection, or other startup
+	failure. greetd will normally relaunch the greeter on a
+	non-zero exit.
 
 # SEE ALSO
 
-*greetd*(1), *cage*(1), *hyprlock*(1)
+*greetd*(1), *cage*(1), *shedman-theme*(1)

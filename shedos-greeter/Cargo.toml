@@ -12,11 +12,9 @@ name = "shedos-greeter"
 path = "src/main.rs"
 
 [dependencies]
+shedos-prompt-ui = { path = "../shedos-prompt-ui" }
 smithay-client-toolkit = "0.19"
 wayland-client = "0.31"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-fontdue = "0.9"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 greetd_ipc = { version = "0.10", features = ["sync-codec"] }
 anyhow = "1"
 log = "0.4"
