@@ -148,9 +148,28 @@ impl WaylandRenderer {
     }
 }
 
+/// Wayland shell role bound to an [`OutputSurface`].
+enum ShellBinding {
+    Layer(LayerSurface),
+}
+
+impl ShellBinding {
+    fn wl_surface(&self) -> &WlSurface {
+        match self {
+            Self::Layer(l) => l.wl_surface(),
+        }
+    }
+
+    fn commit(&self) {
+        match self {
+            Self::Layer(l) => l.commit(),
+        }
+    }
+}
+
 struct OutputSurface {
     output: WlOutput,
-    layer: LayerSurface,
+    shell: ShellBinding,
     pool: SlotPool,
     width: u32,
     height: u32,
@@ -237,7 +256,7 @@ impl AppState {
 
         self.surfaces.push(OutputSurface {
             output,
-            layer,
+            shell: ShellBinding::Layer(layer),
             pool,
             width: 0,
             height: 0,
@@ -257,13 +276,13 @@ impl AppState {
     fn surface_index_by_layer(&self, target: &LayerSurface) -> Option<usize> {
         self.surfaces
             .iter()
-            .position(|s| s.layer.wl_surface() == target.wl_surface())
+            .position(|s| s.shell.wl_surface() == target.wl_surface())
     }
 
     fn surface_index_by_wl_surface(&self, target: &WlSurface) -> Option<usize> {
         self.surfaces
             .iter()
-            .position(|s| s.layer.wl_surface() == target)
+            .position(|s| s.shell.wl_surface() == target)
     }
 
     fn render_surface(&mut self, idx: usize) -> Result<(), WaylandError> {
@@ -361,13 +380,13 @@ impl AppState {
             }
         }
 
-        let surface = s.layer.wl_surface().clone();
+        let surface = s.shell.wl_surface().clone();
         surface.frame(&self.qh, surface.clone());
         surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
         buffer
             .attach_to(&surface)
             .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
-        s.layer.commit();
+        s.shell.commit();
         Ok(())
     }
 }
