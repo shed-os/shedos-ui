@@ -92,11 +92,13 @@ pub struct RenderParams<'a> {
     pub error_message: Option<&'a str>,
 }
 
-/// Paint the wallpaper across the whole canvas, then mirror the
-/// widgets onto each output's rect. `outputs` should hold one rect
-/// per `wl_output` (single-monitor → a single rect equal to the
-/// canvas; multi-monitor → one rect per physical output, all
-/// rendered identically per the no-dimming spec).
+/// Paint a wallpaper-and-widgets composition for every output rect.
+/// Each output gets its own self-contained, correctly-aspected
+/// wallpaper (no stretch across cage's spanned canvas) and a full
+/// mirrored widget set. `outputs` should hold one rect per
+/// `wl_output` (single-monitor → a single rect equal to the canvas;
+/// multi-monitor → one rect per physical output, all rendered
+/// identically per the no-dimming spec).
 ///
 /// Caller's wl_shm buffer is wl_shm::Format::Argb8888 (BGRA byte
 /// order on little-endian); `canvas` length must be at least
@@ -118,7 +120,6 @@ pub fn render(
     if canvas.len() < need {
         return;
     }
-    cache.wallpaper.blit(canvas, canvas_w, canvas_h);
     let fallback_rect = OutputRect {
         x: 0,
         y: 0,
@@ -130,6 +131,12 @@ pub fn render(
     } else {
         outputs
     };
+    // Wallpapers first, all rects, then widgets — keeps widget
+    // overlays from being clobbered if rects ever share boundary
+    // pixels.
+    for rect in rects {
+        cache.wallpaper.blit_rect(canvas, canvas_w, canvas_h, rect);
+    }
     for rect in rects {
         widgets::paint_widgets(
             canvas,
