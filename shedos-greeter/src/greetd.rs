@@ -8,11 +8,17 @@
 //!    - `AuthMessage` (Info | Error) → log it, ack with
 //!      `PostAuthMessageResponse { response: None }` and continue.
 //!    - `Success` → break.
-//!    - `Error` → return failure (caller clears password and retries
-//!      on a *new* socket; greetd considers a session tarnished after
-//!      an Error and will only honor `CancelSession` until then).
+//!    - `Error` → return failure. greetd considers a session tarnished
+//!      after an Error and only honors `CancelSession` until reset; our
+//!      `Drop` impl sends `CancelSession` on every non-success path so
+//!      the next `CreateSession` on a fresh socket sees a clean slate.
+//!      Without that cleanup a single wrong-password attempt soft-bricks
+//!      the greeter — every subsequent attempt fails with "a session
+//!      is already being configured" until reboot.
 //! 3. `StartSession { cmd, env }` to launch the user session;
-//!    on `Success` we exit and greetd execs the user's session.
+//!    on `Success` we mark the auth as succeeded (suppressing the Drop
+//!    cancel, since greetd is now mid-handoff to the user session) and
+//!    exit.
 
 use std::os::unix::net::UnixStream;
 
@@ -21,6 +27,22 @@ use greetd_ipc::{codec::SyncCodec, AuthMessageType, ErrorType, Request, Response
 
 pub struct Auth {
     stream: UnixStream,
+    /// Set true after `StartSession` returns `Success`. The Drop impl
+    /// sends `CancelSession` iff this is false, so any error path —
+    /// named branches, `?` propagation from I/O errors, unexpected
+    /// responses — cleanly resets greetd's per-worker session state.
+    succeeded: bool,
+}
+
+impl Drop for Auth {
+    fn drop(&mut self) {
+        if !self.succeeded {
+            // Best-effort cancel; if the socket is already broken we
+            // can't do better than the original error report. Silent
+            // drop of any I/O failure here is intentional.
+            let _ = Request::CancelSession.write_to(&mut self.stream);
+        }
+    }
 }
 
 impl Auth {
@@ -31,7 +53,7 @@ impl Auth {
             .context("GREETD_SOCK not set; greeter must be launched by greetd")?;
         let stream = UnixStream::connect(&path)
             .with_context(|| format!("connecting to greetd socket at {}", path))?;
-        Ok(Self { stream })
+        Ok(Self { stream, succeeded: false })
     }
 
     /// Authenticate `username` with `password` and start `cmd`. Returns
@@ -90,7 +112,10 @@ impl Auth {
             .write_to(&mut self.stream)
             .context("write StartSession")?;
         match Response::read_from(&mut self.stream).context("read StartSession response")? {
-            Response::Success => Ok(()),
+            Response::Success => {
+                self.succeeded = true;
+                Ok(())
+            }
             Response::Error {
                 error_type,
                 description,
