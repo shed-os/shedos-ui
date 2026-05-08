@@ -17,3 +17,5 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 fontdue = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }

@@ -1,9 +1,17 @@
-//! Theme: concrete palette + wallpaper paths + fonts. Phase 0.3 will
-//! teach `Theme::load_or_default()` to read
-//! `/etc/shedos/themes/current/greeter.toml` and fall back to the
-//! bundled defaults when the theme dir is missing or corrupt.
+//! Theme: concrete palette + wallpaper paths + fonts loaded from
+//! `/etc/shedos/themes/current/greeter.toml` (the theme reconciler's
+//! output) with a robust per-field fallback to bundled defaults so
+//! the surface always paints *something*, even when the theme dir
+//! is missing or partially corrupt.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+
+/// We only consume schema version 1 today; bumps would land in the
+/// reconciler first and we'd refuse newer schemas to avoid
+/// misinterpreting fields.
+const ACCEPTED_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug, Clone)]
 pub struct Theme {
@@ -18,10 +26,35 @@ pub struct Theme {
     pub red: u32,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct GreeterToml {
+    output_schema_version: Option<i64>,
+    wallpaper: Option<String>,
+    wallpaper_blurred: Option<String>,
+    fonts: Option<GreeterFonts>,
+    colors: Option<GreeterColors>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GreeterFonts {
+    ui: Option<String>,
+    mono: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GreeterColors {
+    base: Option<String>,
+    text: Option<String>,
+    accent: Option<String>,
+    red: Option<String>,
+}
+
 impl Theme {
-    /// Bundled-into-the-binary defaults. Robust safety net so the
-    /// surface always paints *something*, even when
-    /// `/etc/shedos/themes/current/` is missing or corrupt.
+    pub const CURRENT_DIR: &'static str = "/etc/shedos/themes/current";
+
+    /// Bundled-into-the-binary defaults. The safety net per the spec:
+    /// surfaces always paint *something*, even when the theme dir is
+    /// missing entirely.
     pub fn fallback() -> Self {
         Self {
             wallpaper: PathBuf::from("/usr/share/shedos/wallpapers/dusk.png"),
@@ -35,5 +68,239 @@ impl Theme {
             accent: 0xFF89B4FA,
             red: 0xFFF38BA8,
         }
+    }
+
+    /// Load from `/etc/shedos/themes/current/greeter.toml` with
+    /// per-field fallback to bundled defaults.
+    pub fn load_or_default() -> Self {
+        Self::load_or_default_from(Path::new(Self::CURRENT_DIR))
+    }
+
+    /// Load from `<dir>/greeter.toml`. Test-friendly: caller picks
+    /// the directory.
+    pub fn load_or_default_from(dir: &Path) -> Self {
+        let path = dir.join("greeter.toml");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!(
+                    "theme: cannot read {}: {} — using bundled defaults",
+                    path.display(),
+                    e
+                );
+                return Self::fallback();
+            }
+        };
+        let parsed: GreeterToml = match toml::from_str(&text) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!(
+                    "theme: parse error in {}: {} — using bundled defaults",
+                    path.display(),
+                    e
+                );
+                return Self::fallback();
+            }
+        };
+        if parsed.output_schema_version != Some(ACCEPTED_SCHEMA_VERSION) {
+            log::warn!(
+                "theme: {} schema version {:?} not supported (want {}) — using bundled",
+                path.display(),
+                parsed.output_schema_version,
+                ACCEPTED_SCHEMA_VERSION
+            );
+            return Self::fallback();
+        }
+        Self::merge(parsed)
+    }
+
+    fn merge(parsed: GreeterToml) -> Self {
+        let fb = Self::fallback();
+        let wallpaper = parsed
+            .wallpaper
+            .as_deref()
+            .and_then(|p| validate_readable_path(p).map(PathBuf::from))
+            .unwrap_or_else(|| {
+                log_fallback("wallpaper", parsed.wallpaper.as_deref());
+                fb.wallpaper.clone()
+            });
+        let wallpaper_blurred = parsed
+            .wallpaper_blurred
+            .as_deref()
+            .and_then(|p| validate_readable_path(p).map(PathBuf::from))
+            .unwrap_or_else(|| {
+                log_fallback("wallpaper_blurred", parsed.wallpaper_blurred.as_deref());
+                fb.wallpaper_blurred.clone()
+            });
+        let fonts = parsed.fonts.unwrap_or_default();
+        let colors = parsed.colors.unwrap_or_default();
+        Self {
+            wallpaper,
+            wallpaper_blurred,
+            font_ui: fonts.ui.unwrap_or_else(|| fb.font_ui.clone()),
+            font_mono: fonts.mono.unwrap_or_else(|| fb.font_mono.clone()),
+            base: parse_hex_or_fallback("base", colors.base.as_deref(), fb.base),
+            text: parse_hex_or_fallback("text", colors.text.as_deref(), fb.text),
+            accent: parse_hex_or_fallback("accent", colors.accent.as_deref(), fb.accent),
+            red: parse_hex_or_fallback("red", colors.red.as_deref(), fb.red),
+        }
+    }
+}
+
+fn validate_readable_path(p: &str) -> Option<&str> {
+    let path = Path::new(p);
+    if path.is_file() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+fn log_fallback(field: &str, value: Option<&str>) {
+    log::warn!(
+        "theme: {} {:?} unreadable — using bundled fallback",
+        field,
+        value
+    );
+}
+
+/// Parse `#rrggbb` (case-insensitive) into 0xFFRRGGBB. None or
+/// malformed → log + fallback.
+fn parse_hex_or_fallback(field: &str, raw: Option<&str>, fallback: u32) -> u32 {
+    let Some(s) = raw else {
+        return fallback;
+    };
+    if let Some(parsed) = parse_hex(s) {
+        parsed
+    } else {
+        log::warn!(
+            "theme: color {field}={raw:?} is not #rrggbb — using fallback {fallback:#010x}"
+        );
+        fallback
+    }
+}
+
+fn parse_hex(s: &str) -> Option<u32> {
+    let stripped = s.strip_prefix('#')?;
+    if stripped.len() != 6 || !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let n = u32::from_str_radix(stripped, 16).ok()?;
+    Some(0xFF000000 | n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn parses_hex_ok() {
+        assert_eq!(parse_hex("#1e1e2e"), Some(0xFF1E1E2E));
+        assert_eq!(parse_hex("#FFFFFF"), Some(0xFFFFFFFF));
+        assert_eq!(parse_hex("#000000"), Some(0xFF000000));
+    }
+
+    #[test]
+    fn rejects_malformed_hex() {
+        assert_eq!(parse_hex("1e1e2e"), None); // missing #
+        assert_eq!(parse_hex("#1e1e2"), None); // too short
+        assert_eq!(parse_hex("#1e1e2eg"), None); // non-hex
+    }
+
+    #[test]
+    fn fallback_when_dir_missing() {
+        let t = Theme::load_or_default_from(Path::new("/nonexistent/shedos-test"));
+        assert_eq!(t.base, Theme::fallback().base);
+    }
+
+    #[test]
+    fn loads_full_theme_when_present() {
+        let dir = tempdir();
+        // Write a minimal valid greeter.toml referencing this very
+        // file as the "wallpaper" so the readable-path check passes.
+        let dummy_wallpaper = dir.join("dummy.png");
+        fs::write(&dummy_wallpaper, b"\x89PNG\r\n").unwrap();
+        let toml = format!(
+            r##"
+output_schema_version = 1
+wallpaper = "{p}"
+wallpaper_blurred = "{p}"
+[fonts]
+ui = "TestFont 12"
+mono = "TestMono"
+[colors]
+base = "#112233"
+text = "#aabbcc"
+accent = "#ff0000"
+red = "#00ff00"
+"##,
+            p = dummy_wallpaper.display()
+        );
+        fs::write(dir.join("greeter.toml"), toml).unwrap();
+        let t = Theme::load_or_default_from(&dir);
+        assert_eq!(t.font_ui, "TestFont 12");
+        assert_eq!(t.font_mono, "TestMono");
+        assert_eq!(t.base, 0xFF112233);
+        assert_eq!(t.text, 0xFFAABBCC);
+        assert_eq!(t.accent, 0xFFFF0000);
+        assert_eq!(t.red, 0xFF00FF00);
+        assert_eq!(t.wallpaper, dummy_wallpaper);
+        // Cleanup
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn falls_back_per_field_on_partial_corruption() {
+        let dir = tempdir();
+        // Valid colors + fonts, but wallpaper paths don't exist.
+        let toml = r##"
+output_schema_version = 1
+wallpaper = "/nope/missing.png"
+wallpaper_blurred = "/nope/missing-blurred.png"
+[fonts]
+ui = "OnlyUI"
+[colors]
+base = "#112233"
+text = "BAD"
+"##;
+        fs::write(dir.join("greeter.toml"), toml).unwrap();
+        let t = Theme::load_or_default_from(&dir);
+        // Wallpaper paths fall back to bundled.
+        assert_eq!(t.wallpaper, Theme::fallback().wallpaper);
+        assert_eq!(t.wallpaper_blurred, Theme::fallback().wallpaper_blurred);
+        // Provided fields stick where valid.
+        assert_eq!(t.font_ui, "OnlyUI");
+        assert_eq!(t.font_mono, Theme::fallback().font_mono); // missing
+        assert_eq!(t.base, 0xFF112233);
+        assert_eq!(t.text, Theme::fallback().text); // malformed → fallback
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn falls_back_on_unknown_schema_version() {
+        let dir = tempdir();
+        fs::write(
+            dir.join("greeter.toml"),
+            "output_schema_version = 999\n",
+        )
+        .unwrap();
+        let t = Theme::load_or_default_from(&dir);
+        assert_eq!(t.base, Theme::fallback().base);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn tempdir() -> PathBuf {
+        let unique = format!(
+            "shedos-theme-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        );
+        let p = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&p).unwrap();
+        p
     }
 }
