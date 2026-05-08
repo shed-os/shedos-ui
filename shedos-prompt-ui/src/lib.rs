@@ -18,6 +18,7 @@ pub mod primitives;
 pub mod text;
 pub mod theme;
 pub mod wallpaper;
+pub mod watch;
 pub mod widgets;
 
 pub use theme::Theme;
