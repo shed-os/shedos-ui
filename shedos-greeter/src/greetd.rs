@@ -74,11 +74,24 @@ impl Auth {
                     error_type,
                     description,
                 } => {
-                    let kind = match error_type {
-                        ErrorType::AuthError => "auth",
-                        ErrorType::Error => "error",
+                    // Keep the full PAM/greetd diagnostic in the
+                    // journal; surface a friendly message to the
+                    // user. AuthError → user typed wrong; Error →
+                    // systems-side failure (PAM misconfig, etc.).
+                    log::warn!(
+                        "greetd auth ended in {:?}: {}",
+                        error_type,
+                        description
+                    );
+                    let msg = match error_type {
+                        ErrorType::AuthError => {
+                            "Incorrect username or password".to_string()
+                        }
+                        ErrorType::Error => {
+                            "Authentication failed. Please try again.".to_string()
+                        }
                     };
-                    return Err(anyhow!("greetd {}: {}", kind, description));
+                    return Err(anyhow!("{}", msg));
                 }
                 Response::AuthMessage {
                     auth_message_type,
@@ -119,12 +132,18 @@ impl Auth {
             Response::Error {
                 error_type,
                 description,
-            } => Err(anyhow!(
-                "greetd start_session ({:?}): {}",
-                error_type,
-                description
-            )),
-            other => Err(anyhow!("unexpected response to StartSession: {:?}", other)),
+            } => {
+                log::warn!(
+                    "greetd start_session failed ({:?}): {}",
+                    error_type,
+                    description
+                );
+                Err(anyhow!("Could not start session. Please try again."))
+            }
+            other => {
+                log::warn!("unexpected response to StartSession: {:?}", other);
+                Err(anyhow!("Could not start session. Please try again."))
+            }
         }
     }
 }
