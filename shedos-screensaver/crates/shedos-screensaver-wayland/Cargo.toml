@@ -12,5 +12,6 @@ description = "Wayland-native fullscreen overlay renderer (wlr-layer-shell + wlr
 shedos-screensaver-core.workspace = true
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
+wayland-protocols.workspace = true
 fontdue.workspace = true
 image.workspace = true

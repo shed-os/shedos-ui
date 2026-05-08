@@ -16,10 +16,12 @@
 //! on this iGPU" failures. If perf becomes an issue we can revisit.
 
 mod font;
+mod lock;
 mod surface;
 mod wallpaper;
 
 pub use font::FontAtlas;
+pub use lock::LockHandle;
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
