@@ -12,6 +12,8 @@ name = "shedos_prompt_ui"
 path = "src/lib.rs"
 
 [dependencies]
-# Phase 0.2 fills these in (image, fontdue, chrono, tomlkit-equivalent
-# for greeter.toml parsing). Keeping the scaffold dep-free lets Phase
-# 0.1 land with no transitive deps to audit.
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+fontdue = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+log = "0.4"

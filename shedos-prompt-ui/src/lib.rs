@@ -1,105 +1,147 @@
 //! Shared rendering for ShedOS lock surfaces — the greeter
 //! (`shedos-greeter`) and the screensaver-as-lock-client
-//! (`shedos-screensaver --mode=lock`) draw the same widgets through
-//! this crate so the two surfaces stay pixel-identical and both
-//! react to `shedman theme set` the same way.
+//! (`shedos-screensaver --mode=lock`) both draw the same widgets
+//! through this crate so the two surfaces stay pixel-identical
+//! and react to `shedman theme set` the same way.
 //!
-//! The crate is stateless. The caller owns its wl_shm buffer, theme,
-//! and prompt state; this crate paints widgets into a `u32` row-major
-//! ARGB buffer at the supplied dimensions and returns. Surface
-//! lifecycle (commit, frame callbacks, damage tracking) is the
-//! caller's concern.
-//!
-//! Phase 0.1 ships only the scaffold — the public types, fallback
-//! theme, and a paint-the-background-color render. Phase 0.2 ports
-//! the wallpaper blit, big clock, prompt input, and branding label
-//! from `shedos-greeter`.
+//! The crate is stateless apart from a `WidgetCache` (font + scaled
+//! wallpaper). Callers own their wl_shm buffer, theme, and prompt
+//! state; this crate composites widgets onto the byte buffer and
+//! returns. Surface lifecycle (commit, frame callbacks, damage)
+//! stays with the caller.
 
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use anyhow::Result;
+
+pub mod primitives;
+pub mod text;
+pub mod theme;
+pub mod wallpaper;
+pub mod widgets;
+
+pub use theme::Theme;
+
+use text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
+use wallpaper::Wallpaper;
 
 /// Caller-owned prompt input state. Never holds the typed password —
 /// only the count of characters typed (so the renderer can paint
-/// dots) and a few flags.
+/// dots) plus a few flags.
 #[derive(Debug, Clone, Default)]
 pub struct PromptState {
-    /// Number of characters in the password buffer.
     pub typed_chars: usize,
-    /// True after a failed authentication; the prompt flashes the
-    /// fail color and the caller is expected to clear `typed_chars`.
     pub fail: bool,
-    /// True briefly after a successful unlock has been scheduled, so
-    /// the prompt can show a check-color flash before the surface
-    /// goes away.
     pub success: bool,
-    /// Caps-lock currently engaged; surfaces a small indicator.
     pub capslock: bool,
 }
 
-/// Concrete theme values resolved by the caller.
-///
-/// Greeter and lock screen both load this via
-/// `Theme::load_or_default()` (Phase 0.3) which reads
-/// `/etc/shedos/themes/current/greeter.toml` and falls back to
-/// `Theme::fallback()` if the theme dir is missing or corrupt.
-#[derive(Debug, Clone)]
-pub struct Theme {
-    pub wallpaper: PathBuf,
-    pub wallpaper_blurred: PathBuf,
-    pub font_ui: String,
-    pub font_mono: String,
-    /// All four colors are 0xAARRGGBB (alpha in the high byte).
-    pub base: u32,
-    pub text: u32,
-    pub accent: u32,
-    pub red: u32,
+/// Logical rect (in canvas-local pixels) where one output sits. Used
+/// to centre widgets per output for multi-monitor mirror rendering.
+#[derive(Debug, Clone, Copy)]
+pub struct OutputRect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
 }
 
-impl Theme {
-    /// Bundled-into-the-binary defaults. Robust safety net per the
-    /// Phase 0.3 spec: greeter and lock screen always render
-    /// *something*, even when `/etc/shedos/themes/current/` is
-    /// missing or corrupt.
-    pub fn fallback() -> Self {
-        Self {
-            wallpaper: PathBuf::from("/usr/share/shedos/wallpapers/dusk.png"),
-            wallpaper_blurred: PathBuf::from(
-                "/usr/share/shedos/wallpapers/dusk-blurred.png",
-            ),
-            font_ui: "Inter 11".to_string(),
-            font_mono: "JetBrainsMono Nerd Font".to_string(),
-            base: 0xFF1E1E2E,
-            text: 0xFFCDD6F4,
-            accent: 0xFF89B4FA,
-            red: 0xFFF38BA8,
+/// Heavy state that's expensive to rebuild on every redraw: font
+/// faces (loaded once) and the per-surface wallpaper cache. Caller
+/// constructs this once, reuses it across frames, drops it on
+/// surface teardown.
+pub struct WidgetCache {
+    pub regular: FontFace,
+    pub bold: FontFace,
+    wallpaper: Wallpaper,
+}
+
+impl WidgetCache {
+    /// Load fonts + decode the (blurred) wallpaper from the theme.
+    /// Use the blurred wallpaper for lock surfaces — it's softened
+    /// so the prompt UI reads cleanly. Desktop wallpaper daemons
+    /// (awww) read the sharp `theme.wallpaper` directly, not via
+    /// this cache.
+    pub fn new(theme: &Theme) -> Result<Self> {
+        let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
+        let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
+        let wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
+        Ok(Self { regular, bold, wallpaper })
+    }
+
+    /// Re-decode the wallpaper if the theme path changed (e.g. live
+    /// `shedman theme set` while the surface is up).
+    pub fn refresh_wallpaper(&mut self, theme: &Theme) -> Result<()> {
+        if self.wallpaper.source_path() != theme.wallpaper_blurred {
+            self.wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
         }
+        Ok(())
     }
 }
 
-/// Render the prompt UI into the supplied buffer.
+/// Per-frame render parameters that consumers tweak between calls.
+/// Kept as a struct so adding fields (e.g. accessibility hints,
+/// override greeting) doesn't churn the call sites.
+#[derive(Debug, Clone, Default)]
+pub struct RenderParams<'a> {
+    /// Override the "Hi, $user" greeting. None → no greeting line.
+    pub greeting: Option<&'a str>,
+    /// Show this error message in red below the prompt instead of
+    /// the greeting. None → no error.
+    pub error_message: Option<&'a str>,
+}
+
+/// Paint the wallpaper across the whole canvas, then mirror the
+/// widgets onto each output's rect. `outputs` should hold one rect
+/// per `wl_output` (single-monitor → a single rect equal to the
+/// canvas; multi-monitor → one rect per physical output, all
+/// rendered identically per the no-dimming spec).
 ///
-/// `buffer` is row-major in native-endian ARGB; `dim` is `(width,
-/// height)` in pixels. The caller must provide at least `width *
-/// height` `u32`s. Smaller buffers return without writing — never
-/// panic.
+/// Caller's wl_shm buffer is wl_shm::Format::Argb8888 (BGRA byte
+/// order on little-endian); `canvas` length must be at least
+/// `canvas_w * canvas_h * 4`.
 pub fn render(
-    buffer: &mut [u32],
-    dim: (u32, u32),
-    _state: &PromptState,
+    canvas: &mut [u8],
+    canvas_w: u32,
+    canvas_h: u32,
+    outputs: &[OutputRect],
+    state: &PromptState,
     theme: &Theme,
+    cache: &mut WidgetCache,
+    params: &RenderParams<'_>,
 ) {
-    let expected = (dim.0 as usize)
-        .checked_mul(dim.1 as usize)
-        .unwrap_or(0);
-    if expected == 0 || buffer.len() < expected {
+    if canvas_w == 0 || canvas_h == 0 {
         return;
     }
-    // Phase 0.1 scaffold: paint the theme's base color so consumers
-    // can see the crate is wired correctly. Phase 0.2 replaces this
-    // with wallpaper blit + widgets.
-    for px in &mut buffer[..expected] {
-        *px = theme.base;
+    let need = (canvas_w as usize) * (canvas_h as usize) * 4;
+    if canvas.len() < need {
+        return;
+    }
+    cache.wallpaper.blit(canvas, canvas_w, canvas_h);
+    let fallback_rect = OutputRect {
+        x: 0,
+        y: 0,
+        w: canvas_w as i32,
+        h: canvas_h as i32,
+    };
+    let rects: &[OutputRect] = if outputs.is_empty() {
+        std::slice::from_ref(&fallback_rect)
+    } else {
+        outputs
+    };
+    for rect in rects {
+        widgets::paint_widgets(
+            canvas,
+            canvas_w,
+            canvas_h,
+            rect,
+            state,
+            theme,
+            &cache.regular,
+            &cache.bold,
+            params.error_message,
+            params.greeting,
+        );
     }
 }
 
@@ -123,28 +165,8 @@ mod tests {
     }
 
     #[test]
-    fn render_fills_the_buffer_with_base_color() {
-        let dim = (4, 3);
-        let mut buf = vec![0u32; (dim.0 * dim.1) as usize];
-        let theme = Theme::fallback();
-        render(&mut buf, dim, &PromptState::default(), &theme);
-        assert!(buf.iter().all(|&px| px == theme.base));
-    }
-
-    #[test]
-    fn render_is_safe_with_undersized_buffer() {
-        let dim = (16, 16);
-        let mut buf = vec![0u32; 4]; // way too small
-        render(&mut buf, dim, &PromptState::default(), &Theme::fallback());
-        // Must not panic; buffer untouched.
-        assert!(buf.iter().all(|&px| px == 0));
-    }
-
-    #[test]
-    fn render_is_safe_with_zero_dim() {
-        let mut buf = vec![0u32; 100];
-        render(&mut buf, (0, 0), &PromptState::default(), &Theme::fallback());
-        // No write — buffer unchanged.
-        assert!(buf.iter().all(|&px| px == 0));
+    fn output_rect_is_copy() {
+        let r = OutputRect { x: 0, y: 0, w: 100, h: 100 };
+        let _r2 = r; // needs Copy
     }
 }
