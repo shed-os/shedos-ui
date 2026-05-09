@@ -19,9 +19,11 @@ loops. *The animation is how the art appears* — every effect takes
 a target Frame (the SHEDOS variant rendered at the canvas size) and
 drives the canvas from blank to that target.
 
-The same binary backs both surfaces — pass *--mode=tty* or
-*--mode=wayland* to force one. Default *--mode=auto* picks Wayland
-when *$WAYLAND_DISPLAY* is set and stdin is not a TTY.
+The same binary backs three surfaces — pass *--mode=tty*,
+*--mode=wayland*, or *--mode=lock* to force one. Default
+*--mode=auto* picks Wayland when *$WAYLAND_DISPLAY* is set and
+stdin is not a TTY. *--mode=lock* claims *ext-session-lock-v1*
+and is the back-end of *shedman lock*.
 
 Fifteen SHEDOS art variants ship in the catalog (block, ansi-shadow,
 big, outline, 3d-iso, gradient, emboss, shadow-cast, wide,
@@ -57,8 +59,9 @@ sessions.
 
 # RUNTIME OPTIONS
 
-*--mode* _tty_|_wayland_|_auto_
-	Render backend. Default: *auto*.
+*--mode* _tty_|_wayland_|_lock_|_auto_
+	Render backend. Default: *auto*. *lock* drives the system
+	lock screen via *ext-session-lock-v1* — see *LOCK MODE* below.
 
 *--effect* _NAME_
 	Lock to one effect (otherwise: random each cycle). One of
@@ -117,7 +120,41 @@ sessions.
 *--locale* _BCP47_
 	Override system locale.
 
-# EFFECTS
+# LOCK-MODE OPTIONS
+
+These flags only have effect when *--mode=lock*. They override the
+defaults in /etc/shedos/screensaver.toml *[lock]*.
+
+*--prompt-after-secs* _SECS_
+	How long the screensaver runs before the password prompt
+	appears (T2 in the four-phase cycle). Default: *300*.
+
+*--prompt-idle-hide-secs* _SECS_
+	How long the prompt stays visible idle before reverting to
+	the screensaver (T3). Resets on any keypress. Default: *120*.
+
+*--prompt-cycles* _N_
+	Number of prompt-screensaver round-trips before DPMS off.
+	Default: *3*.
+
+# LOCK MODE
+
+*shedman lock* invokes *shedos-screensaver --mode=lock*. The
+binary claims *ext-session-lock-v1* and runs a four-phase cycle:
+screensaver → password prompt visible → prompt hides while the
+screensaver continues → cycle → DPMS off after *--prompt-cycles*
+round-trips. Wakes on any keypress / pointer activity.
+
+Authentication runs through PAM. The password path uses the
+*shedos-screensaver* PAM service (a thin /etc/pam.d wrapper around
+*system-auth*). Fingerprint authentication, when an enrolled
+finger is available, runs in parallel against the
+*shedos-screensaver-fp* service (*pam_fprintd*(8)) — either
+authentication path unlocks the session. The fingerprint icon
+flashes red on each verify-no-match and green on a successful
+match before unlock.
+
+Per-user fingerprint enrollment happens via *shedman-fingerprint*(1).
 
 The 46 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
@@ -351,8 +388,15 @@ copy the snippet from
 
 /usr/share/doc/shedos-screensaver/
 	Bundled docs: hypridle-example.conf, effects.md, logos.md,
-	audio-setup.md.
+	audio-setup.md, lock-mode.md.
+
+/etc/pam.d/shedos-screensaver
+	PAM stack for the password unlock path.
+
+/etc/pam.d/shedos-screensaver-fp
+	PAM stack for the parallel fingerprint unlock path
+	(pam_fprintd-only; no password fallback inside this stack).
 
 # SEE ALSO
 
-*shedman*(1), *hypridle*(1), *hyprlock*(1)
+*shedman*(1), *shedman-fingerprint*(1), *hypridle*(1)
