@@ -17,7 +17,10 @@ use crate::font::FontAtlas;
 use crate::lock::LockBinding;
 use crate::wallpaper::Wallpaper;
 use crate::dpms;
-use crate::{blend_over, pack_argb, AuthFn, FrameProducer, LockConfig, WaylandConfig};
+use crate::{
+    blend_over, pack_argb, AuthFn, FrameProducer, LockConfig, WaylandConfig,
+};
+use std::sync::mpsc::Receiver;
 use shedos_prompt_ui::{OutputRect, PromptState, RenderParams, Theme, WidgetCache};
 use shedos_screensaver_core::{Color, Frame, LockPhase, LockState};
 use smithay_client_toolkit::{
@@ -131,6 +134,8 @@ impl WaylandRenderer {
             prompt_password: String::new(),
             prompt_capslock: false,
             error: None,
+            fingerprint_rx: None,
+            fingerprint_hint: None,
         };
         let _ = config.fps_cap;
 
@@ -182,7 +187,13 @@ impl WaylandRenderer {
             theme_dirty,
             state_config,
             username,
+            fingerprint,
         } = lock_config;
+        let (fingerprint_rx, fingerprint_ping_source, fingerprint_hint) = match fingerprint
+        {
+            Some(fp) => (Some(fp.rx), Some(fp.ping_source), Some(fp.hint_text)),
+            None => (None, None, None),
+        };
 
         let now = Instant::now();
         let lock_state = LockState::new(state_config, now);
@@ -217,12 +228,26 @@ impl WaylandRenderer {
             prompt_password: String::new(),
             prompt_capslock: false,
             error: None,
+            fingerprint_rx,
+            fingerprint_hint,
         };
         let _ = config.fps_cap;
 
         let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
             .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
         let loop_handle = event_loop.handle();
+
+        // Register the fingerprint-thread ping source so a successful
+        // (or failed) scan immediately wakes the wayland loop. The
+        // callback is a no-op — actual result handling reads from the
+        // receiver in the render loop.
+        if let Some(source) = fingerprint_ping_source {
+            loop_handle
+                .insert_source(source, |_, _, _state: &mut AppState| {})
+                .map_err(|e| {
+                    WaylandError::Connect(format!("calloop fingerprint ping insert: {e:?}"))
+                })?;
+        }
 
         let mut wayland_source = WaylandSource::new(conn.clone(), event_queue);
 
@@ -302,6 +327,27 @@ fn run_loop(
     // first, then block on dispatch waiting for the next event (frame
     // callback, key, configure, state-machine deadline, etc.).
     while !state.terminating() {
+        // Drain any pending fingerprint-thread results. A successful
+        // scan unlocks; a failed one flashes the error string on the
+        // prompt and lets the user retry (the fingerprint thread's
+        // own loop will re-arm for the next attempt). Drained into a
+        // Vec first so the rx borrow is released before we mutate
+        // other AppState fields below.
+        let fp_results: Vec<Result<(), String>> = state
+            .fingerprint_rx
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for result in fp_results {
+            match result {
+                Ok(()) => state.should_exit.store(true, Ordering::Release),
+                Err(msg) => {
+                    state.error = Some((Instant::now() + ERROR_HOLD, msg));
+                    state.mark_all_dirty();
+                }
+            }
+        }
+
         // In lock mode, advance the state machine and react to any
         // phase change before rendering — the new phase decides what
         // gets drawn.
@@ -412,6 +458,9 @@ pub(crate) struct AppState {
     prompt_password: String,
     prompt_capslock: bool,
     error: Option<(Instant, String)>,
+    fingerprint_rx: Option<Receiver<Result<(), String>>>,
+    #[allow(dead_code)]
+    fingerprint_hint: Option<String>,
 }
 
 impl AppState {

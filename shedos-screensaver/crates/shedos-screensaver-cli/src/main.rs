@@ -22,9 +22,10 @@ use shedos_screensaver_i18n::{t, t_str, I18n};
 use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
 use shedos_prompt_ui::{watch as theme_watch, Theme, WidgetCache};
+use shedos_screensaver_wayland::calloop_ping;
 use shedos_screensaver_wayland::{
-    AuthFn, FrameProducer, LockConfig, LockStateConfig, ProducerFactory, WaylandConfig,
-    WaylandRenderer,
+    AuthFn, FingerprintConfig, FrameProducer, LockConfig, LockStateConfig, ProducerFactory,
+    WaylandConfig, WaylandRenderer,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -672,6 +673,7 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     });
 
     let state_config = build_lock_state_config(cli)?;
+    let fingerprint = build_fingerprint_config(&username);
 
     Ok(LockConfig {
         theme,
@@ -680,6 +682,27 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
         theme_dirty,
         state_config,
         username,
+        fingerprint,
+    })
+}
+
+fn build_fingerprint_config(username: &str) -> Option<FingerprintConfig> {
+    let info = auth::fingerprint_available(username)?;
+    let (ping, ping_source) = calloop_ping::make_ping().ok()?;
+    let (rx, _handle) =
+        auth::spawn_fingerprint_auth_loop(username.to_owned(), ping);
+    let hint_text = if info.finger_count == 1 {
+        "Touch fingerprint sensor or type password".to_string()
+    } else {
+        format!(
+            "Touch any of your {} enrolled fingers, or type password",
+            info.finger_count
+        )
+    };
+    Some(FingerprintConfig {
+        rx,
+        ping_source,
+        hint_text,
     })
 }
 

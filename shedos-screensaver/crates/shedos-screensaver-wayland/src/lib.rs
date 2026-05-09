@@ -27,9 +27,18 @@ pub use shedos_screensaver_core::LockStateConfig;
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
+/// Re-exports of calloop's ping primitives so the cli crate can construct
+/// a Ping/PingSource pair without depending on calloop directly. The
+/// fingerprint auth thread lives in cli and pings the lock binary's
+/// event loop on every attempt completion.
+pub mod calloop_ping {
+    pub use smithay_client_toolkit::reexports::calloop::ping::{make_ping, Ping, PingSource};
+}
+
 use shedos_screensaver_core::{Color, Frame};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 pub type AuthFn = Box<dyn Fn(&str) -> Result<(), String>>;
@@ -41,6 +50,13 @@ pub struct LockConfig {
     pub theme_dirty: Arc<AtomicBool>,
     pub state_config: LockStateConfig,
     pub username: String,
+    pub fingerprint: Option<FingerprintConfig>,
+}
+
+pub struct FingerprintConfig {
+    pub rx: Receiver<Result<(), String>>,
+    pub ping_source: calloop_ping::PingSource,
+    pub hint_text: String,
 }
 
 /// Configuration handed to [`WaylandRenderer::run`].
