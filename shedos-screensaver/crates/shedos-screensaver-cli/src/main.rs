@@ -31,6 +31,7 @@ use std::time::Duration;
 enum Mode {
     Tty,
     Wayland,
+    Lock,
     Auto,
 }
 
@@ -245,6 +246,7 @@ fn main() -> ExitCode {
     let resolved_mode = resolve_mode(cli.mode);
     let result = match resolved_mode {
         Mode::Wayland => run_wayland(&cli, color_override, audio, Arc::clone(&exit_flag)),
+        Mode::Lock => run_lock(&cli, color_override, audio, Arc::clone(&exit_flag)),
         Mode::Tty | Mode::Auto => run_tty(&cli, color_override, audio, Arc::clone(&exit_flag)),
     };
 
@@ -259,7 +261,8 @@ fn main() -> ExitCode {
 
 fn resolve_mode(m: Mode) -> Mode {
     match m {
-        Mode::Tty | Mode::Wayland => m,
+        // `Auto` must never resolve to `Lock` — explicit only.
+        Mode::Tty | Mode::Wayland | Mode::Lock => m,
         Mode::Auto => {
             if stdout_is_tty() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
                 Mode::Tty
@@ -559,6 +562,61 @@ fn run_wayland(
     }
 
     WaylandRenderer::run(cfg, factory, exit_flag).map_err(|e| format!("wayland: {e}"))
+}
+
+fn run_lock(
+    cli: &Cli,
+    color_override: Option<Color>,
+    audio: Option<AudioCapture>,
+    exit_flag: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    let wallpaper_path = resolve_wallpaper(&cli.wallpaper);
+    let cfg = WaylandConfig {
+        font_path: cli.font_path.clone(),
+        cell_height_px: cli.cell_height_px,
+        wallpaper_path,
+        wallpaper_dim: cli.wallpaper_dim,
+        fps_cap: cli.fps.unwrap_or(60).max(1),
+        idle_daemon: cli.idle_daemon,
+    };
+
+    let logo = cli.logo.clone();
+    let effect = cli.effect.clone();
+    let cycle = cli.cycle.clone();
+    let hold = Duration::from_secs_f32(cli.hold.max(0.0));
+    let duration = cli.duration;
+    let exit_for_factory = Arc::clone(&exit_flag);
+    let mut audio_one_shot = audio;
+
+    let factory: ProducerFactory = Box::new(move || {
+        Box::new(EngineProducer {
+            engine: Engine::new(
+                logo.clone(),
+                effect.clone(),
+                cycle.clone(),
+                color_override,
+                hold,
+                audio_one_shot.take(),
+            ),
+            registry: EffectsRegistry::new(),
+            clock: RealClock::new(),
+            last_frame: Duration::ZERO,
+            first: true,
+            exit_flag: Arc::clone(&exit_for_factory),
+            duration,
+            start: Duration::ZERO,
+        }) as Box<dyn FrameProducer>
+    });
+
+    if let Some(d) = cli.duration {
+        let f = Arc::clone(&exit_flag);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs_f32(d));
+            f.store(true, Ordering::Release);
+        });
+    }
+
+    WaylandRenderer::run_locked(cfg, factory, exit_flag).map_err(|e| format!("lock: {e}"))
 }
 
 fn resolve_wallpaper(arg: &str) -> Option<PathBuf> {

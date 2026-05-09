@@ -14,6 +14,7 @@
 //! their silence path on those screens.
 
 use crate::font::FontAtlas;
+use crate::lock::LockBinding;
 use crate::wallpaper::Wallpaper;
 use crate::{blend_over, pack_argb, FrameProducer, WaylandConfig};
 use shedos_screensaver_core::{Color, Frame};
@@ -43,9 +44,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use wayland_client::{
-    globals::registry_queue_init,
+    globals::{registry_queue_init, GlobalList},
     protocol::{wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
-    Connection, QueueHandle,
+    Connection, EventQueue, Proxy, QueueHandle,
+};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+    ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
 };
 
 /// Mints frame producers — one per output. Called as outputs are
@@ -102,6 +107,8 @@ impl WaylandRenderer {
             wallpaper_path: config.wallpaper_path,
             wallpaper_dim: config.wallpaper_dim,
             surfaces: Vec::new(),
+            is_lock_mode: false,
+            lock_binding: None,
         };
         let _ = config.fps_cap;
 
@@ -111,58 +118,171 @@ impl WaylandRenderer {
             .roundtrip(&mut state)
             .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
 
-        // Wait until at least one surface gets its first configure.
-        while !state.any_configured() && !state.should_exit() {
-            event_queue
-                .blocking_dispatch(&mut state)
-                .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
-        }
-        if state.should_exit() {
-            return Ok(());
-        }
+        run_render_loop(&mut state, &mut event_queue)
+    }
 
-        // Render loop. Each surface flips its own `needs_redraw` from
-        // its frame callback; we render whichever are ready, then
-        // dispatch to wait for the next callback. Order matters: a
-        // dispatch-first loop would block on the first iteration
-        // because the configure event has already been consumed
-        // upstream and no further events arrive until we commit the
-        // first buffer.
-        while !state.should_exit() && !state.input_dismissed {
-            for i in 0..state.surfaces.len() {
-                if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
-                    state.render_surface(i)?;
-                    state.surfaces[i].needs_redraw = false;
-                    state.surfaces[i].last_frame = Some(Instant::now());
-                }
-            }
-            if state.should_exit() || state.input_dismissed {
-                break;
-            }
-            event_queue
-                .blocking_dispatch(&mut state)
-                .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
-        }
+    pub fn run_locked(
+        config: WaylandConfig,
+        producer_factory: ProducerFactory,
+        should_exit: Arc<AtomicBool>,
+    ) -> Result<(), WaylandError> {
+        let conn = Connection::connect_to_env()
+            .map_err(|e| WaylandError::Connect(format!("{e}")))?;
+        let (globals, mut event_queue) = registry_queue_init(&conn)
+            .map_err(|e| WaylandError::Connect(format!("registry init: {e}")))?;
+        let qh: QueueHandle<AppState> = event_queue.handle();
 
-        Ok(())
+        let registry_state = RegistryState::new(&globals);
+        let output_state = OutputState::new(&globals, &qh);
+        let seat_state = SeatState::new(&globals, &qh);
+        let compositor_state = CompositorState::bind(&globals, &qh)
+            .map_err(|e| WaylandError::Bind(format!("compositor: {e}")))?;
+        let layer_shell = LayerShell::bind(&globals, &qh)
+            .map_err(|e| WaylandError::Bind(format!("wlr-layer-shell-unstable-v1: {e}")))?;
+        let shm = Shm::bind(&globals, &qh)
+            .map_err(|e| WaylandError::Bind(format!("wl_shm: {e}")))?;
+
+        let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
+            .map_err(|e| WaylandError::Font(format!("{e}")))?;
+
+        let mut state = AppState {
+            registry_state,
+            output_state,
+            seat_state,
+            shm,
+            compositor_state,
+            layer_shell,
+            qh: qh.clone(),
+            keyboard: None,
+            pointer: None,
+            should_exit: Arc::clone(&should_exit),
+            input_dismissed: false,
+            idle_daemon: config.idle_daemon,
+            producer_factory,
+            font,
+            wallpaper_path: config.wallpaper_path,
+            wallpaper_dim: config.wallpaper_dim,
+            surfaces: Vec::new(),
+            is_lock_mode: true,
+            lock_binding: None,
+        };
+        let _ = config.fps_cap;
+
+        event_queue
+            .roundtrip(&mut state)
+            .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
+
+        let manager: ExtSessionLockManagerV1 = bind_session_lock_manager(&globals, &qh)?;
+        let lock = manager.lock(&qh, ());
+        state.lock_binding = Some(LockBinding::new(lock));
+
+        let result = drive_locked_session(&mut state, &mut event_queue);
+
+        if let Some(lb) = state.lock_binding.as_mut() {
+            lb.close();
+        }
+        let _ = event_queue.roundtrip(&mut state);
+
+        result
     }
 }
 
+fn drive_locked_session(
+    state: &mut AppState,
+    event_queue: &mut EventQueue<AppState>,
+) -> Result<(), WaylandError> {
+    // The compositor sends `Locked` only after we commit our first lock-surface
+    // buffers, so we don't wait — roundtrip catches any immediate `Finished`,
+    // then we mint surfaces and let the render loop drive configures + commits.
+    event_queue
+        .roundtrip(state)
+        .map_err(|e| WaylandError::Dispatch(format!("post-lock roundtrip: {e}")))?;
+    if state.lock_binding.as_ref().is_some_and(|lb| lb.finished) {
+        return Err(WaylandError::Bind(
+            "compositor refused ext-session-lock-v1. Recovery: switch to a tty and \
+             run `loginctl unlock-session`."
+                .into(),
+        ));
+    }
+
+    let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
+    for o in outputs {
+        state.add_output(o);
+    }
+
+    run_render_loop(state, event_queue)
+}
+
+fn bind_session_lock_manager(
+    globals: &GlobalList,
+    qh: &QueueHandle<AppState>,
+) -> Result<ExtSessionLockManagerV1, WaylandError> {
+    globals
+        .bind(qh, 1..=1, ())
+        .map_err(|e| WaylandError::Bind(format!("ext_session_lock_manager_v1: {e}")))
+}
+
+fn run_render_loop(
+    state: &mut AppState,
+    event_queue: &mut EventQueue<AppState>,
+) -> Result<(), WaylandError> {
+    // Wait until at least one surface gets its first configure.
+    while !state.any_configured() && !state.terminating() {
+        event_queue
+            .blocking_dispatch(state)
+            .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
+    }
+    if state.terminating() {
+        return Ok(());
+    }
+
+    // Render loop. Each surface flips its own `needs_redraw` from
+    // its frame callback; we render whichever are ready, then
+    // dispatch to wait for the next callback. Order matters: a
+    // dispatch-first loop would block on the first iteration
+    // because the configure event has already been consumed
+    // upstream and no further events arrive until we commit the
+    // first buffer.
+    while !state.terminating() {
+        for i in 0..state.surfaces.len() {
+            if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
+                state.render_surface(i)?;
+                state.surfaces[i].needs_redraw = false;
+                state.surfaces[i].last_frame = Some(Instant::now());
+            }
+        }
+        if state.terminating() {
+            break;
+        }
+        event_queue
+            .blocking_dispatch(state)
+            .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
+    }
+
+    Ok(())
+}
+
 /// Wayland shell role bound to an [`OutputSurface`].
-enum ShellBinding {
+pub(crate) enum ShellBinding {
     Layer(LayerSurface),
+    Lock {
+        wl_surface: WlSurface,
+        lock_surface: ExtSessionLockSurfaceV1,
+    },
 }
 
 impl ShellBinding {
     fn wl_surface(&self) -> &WlSurface {
         match self {
             Self::Layer(l) => l.wl_surface(),
+            Self::Lock { wl_surface, .. } => wl_surface,
         }
     }
 
     fn commit(&self) {
         match self {
             Self::Layer(l) => l.commit(),
+            Self::Lock { wl_surface, .. } => wl_surface.commit(),
         }
     }
 }
@@ -181,7 +301,7 @@ struct OutputSurface {
     needs_redraw: bool,
 }
 
-struct AppState {
+pub(crate) struct AppState {
     registry_state: RegistryState,
     output_state: OutputState,
     seat_state: SeatState,
@@ -199,11 +319,19 @@ struct AppState {
     wallpaper_path: Option<PathBuf>,
     wallpaper_dim: f32,
     surfaces: Vec<OutputSurface>,
+    is_lock_mode: bool,
+    pub(crate) lock_binding: Option<LockBinding>,
 }
 
 impl AppState {
     fn should_exit(&self) -> bool {
         self.should_exit.load(Ordering::Acquire)
+    }
+
+    fn terminating(&self) -> bool {
+        self.should_exit()
+            || self.input_dismissed
+            || self.lock_binding.as_ref().is_some_and(|lb| lb.finished)
     }
 
     fn any_configured(&self) -> bool {
@@ -219,14 +347,18 @@ impl AppState {
         self.input_dismissed = true;
     }
 
-    /// Create a new layer surface bound to `output`. Mints a fresh
-    /// producer via the factory.
     fn add_output(&mut self, output: WlOutput) {
-        // Defence against duplicate `new_output` events.
         if self.surfaces.iter().any(|s| s.output == output) {
             return;
         }
+        if self.is_lock_mode {
+            self.add_lock_output(output);
+        } else {
+            self.add_layer_output(output);
+        }
+    }
 
+    fn add_layer_output(&mut self, output: WlOutput) {
         let surface = self.compositor_state.create_surface(&self.qh);
         let layer = self.layer_shell.create_layer_surface(
             &self.qh,
@@ -244,14 +376,8 @@ impl AppState {
         });
         layer.commit();
 
-        let pool = match SlotPool::new(4, &self.shm) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!(
-                    "shedos-screensaver-wayland: pool for new output failed: {e}"
-                );
-                return;
-            }
+        let Some(pool) = self.new_pool() else {
+            return;
         };
 
         self.surfaces.push(OutputSurface {
@@ -267,6 +393,92 @@ impl AppState {
             producer: (self.producer_factory)(),
             needs_redraw: true,
         });
+    }
+
+    fn add_lock_output(&mut self, output: WlOutput) {
+        let Some(lb) = self.lock_binding.as_ref() else {
+            return;
+        };
+        let wl_surface = self.compositor_state.create_surface(&self.qh);
+        let lock_surface = lb.lock.get_lock_surface(&wl_surface, &output, &self.qh, ());
+
+        let Some(pool) = self.new_pool() else {
+            return;
+        };
+
+        self.surfaces.push(OutputSurface {
+            output,
+            shell: ShellBinding::Lock {
+                wl_surface,
+                lock_surface,
+            },
+            pool,
+            width: 0,
+            height: 0,
+            configured: false,
+            wallpaper_cache: None,
+            last_frame: None,
+            frame: Frame::new(0, 0),
+            producer: (self.producer_factory)(),
+            needs_redraw: true,
+        });
+    }
+
+    fn new_pool(&self) -> Option<SlotPool> {
+        match SlotPool::new(4, &self.shm) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("shedos-screensaver-wayland: pool for new output failed: {e}");
+                None
+            }
+        }
+    }
+
+    pub(crate) fn apply_lock_surface_configure(
+        &mut self,
+        target: &ExtSessionLockSurfaceV1,
+        width: u32,
+        height: u32,
+    ) {
+        let Some(idx) = self.surfaces.iter().position(|s| match &s.shell {
+            ShellBinding::Lock { lock_surface, .. } => lock_surface.id() == target.id(),
+            _ => false,
+        }) else {
+            return;
+        };
+        let output = self.surfaces[idx].output.clone();
+        let (mut w, mut h) = (width, height);
+        if w == 0 || h == 0 {
+            if let Some(info) = self.output_state.info(&output) {
+                let fallback = info
+                    .logical_size
+                    .map(|(lw, lh)| (lw.max(0) as u32, lh.max(0) as u32))
+                    .or_else(|| {
+                        info.modes
+                            .iter()
+                            .find(|m| m.current)
+                            .map(|m| (m.dimensions.0.max(0) as u32, m.dimensions.1.max(0) as u32))
+                    });
+                if let Some((fw, fh)) = fallback {
+                    if w == 0 {
+                        w = fw;
+                    }
+                    if h == 0 {
+                        h = fh;
+                    }
+                }
+            }
+        }
+        let s = &mut self.surfaces[idx];
+        if w > 0 && h > 0 {
+            s.width = w;
+            s.height = h;
+            let needed = (w * h * 4) as usize;
+            let _ = s.pool.resize(needed.max(4));
+            s.configured = true;
+            s.wallpaper_cache = None;
+            s.needs_redraw = true;
+        }
     }
 
     fn drop_output(&mut self, output: &WlOutput) {
@@ -469,6 +681,9 @@ impl OutputHandler for AppState {
         &mut self.output_state
     }
     fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, output: WlOutput) {
+        if self.is_lock_mode && self.lock_binding.is_none() {
+            return;
+        }
         self.add_output(output);
     }
     fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: WlOutput) {}
@@ -582,6 +797,9 @@ impl PointerHandler for AppState {
         _pointer: &WlPointer,
         events: &[PointerEvent],
     ) {
+        if self.is_lock_mode {
+            return;
+        }
         for e in events {
             match e.kind {
                 PointerEventKind::Press { .. }

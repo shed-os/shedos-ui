@@ -21,7 +21,6 @@ mod surface;
 mod wallpaper;
 
 pub use font::FontAtlas;
-pub use lock::LockHandle;
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
