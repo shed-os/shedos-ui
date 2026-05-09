@@ -24,6 +24,10 @@ use smithay_client_toolkit::{
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
     delegate_registry, delegate_seat, delegate_shm,
     output::{OutputHandler, OutputState},
+    reexports::{
+        calloop::EventLoop,
+        calloop_wayland_source::WaylandSource,
+    },
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
@@ -49,7 +53,7 @@ const ERROR_HOLD: Duration = Duration::from_secs(2);
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
     protocol::{wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
-    Connection, EventQueue, Proxy, QueueHandle,
+    Connection, Proxy, QueueHandle,
 };
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1::ExtSessionLockManagerV1,
@@ -75,7 +79,7 @@ impl WaylandRenderer {
     ) -> Result<(), WaylandError> {
         let conn = Connection::connect_to_env()
             .map_err(|e| WaylandError::Connect(format!("{e}")))?;
-        let (globals, mut event_queue) = registry_queue_init(&conn)
+        let (globals, event_queue) = registry_queue_init(&conn)
             .map_err(|e| WaylandError::Connect(format!("registry init: {e}")))?;
         let qh: QueueHandle<AppState> = event_queue.handle();
 
@@ -122,11 +126,20 @@ impl WaylandRenderer {
         };
         let _ = config.fps_cap;
 
-        event_queue
+        let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
+            .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
+        let loop_handle = event_loop.handle();
+
+        let mut wayland_source = WaylandSource::new(conn, event_queue);
+        wayland_source
+            .queue()
             .roundtrip(&mut state)
             .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
+        wayland_source
+            .insert(loop_handle)
+            .map_err(|e| WaylandError::Connect(format!("calloop insert: {e:?}")))?;
 
-        run_render_loop(&mut state, &mut event_queue)
+        run_render_loop(&mut state, &mut event_loop)
     }
 
     pub fn run_locked(
@@ -137,7 +150,7 @@ impl WaylandRenderer {
     ) -> Result<(), WaylandError> {
         let conn = Connection::connect_to_env()
             .map_err(|e| WaylandError::Connect(format!("{e}")))?;
-        let (globals, mut event_queue) = registry_queue_init(&conn)
+        let (globals, event_queue) = registry_queue_init(&conn)
             .map_err(|e| WaylandError::Connect(format!("registry init: {e}")))?;
         let qh: QueueHandle<AppState> = event_queue.handle();
 
@@ -191,7 +204,17 @@ impl WaylandRenderer {
         };
         let _ = config.fps_cap;
 
-        event_queue
+        let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
+            .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
+        let loop_handle = event_loop.handle();
+
+        let mut wayland_source = WaylandSource::new(conn.clone(), event_queue);
+
+        // All synchronous wayland operations happen via wayland_source.queue()
+        // BEFORE the source is inserted into the event loop. After insert,
+        // the loop owns the queue.
+        wayland_source
+            .queue()
             .roundtrip(&mut state)
             .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
 
@@ -199,41 +222,40 @@ impl WaylandRenderer {
         let lock = manager.lock(&qh, ());
         state.lock_binding = Some(LockBinding::new(lock));
 
-        let result = drive_locked_session(&mut state, &mut event_queue);
+        // Hyprland sends `Locked` only after we commit our first lock-surface
+        // buffers, so the roundtrip catches any immediate `Finished` from a
+        // policy denial; otherwise we proceed to mint surfaces and let the
+        // render loop drive configure + commit.
+        wayland_source
+            .queue()
+            .roundtrip(&mut state)
+            .map_err(|e| WaylandError::Dispatch(format!("post-lock roundtrip: {e}")))?;
+        if state.lock_binding.as_ref().is_some_and(|lb| lb.finished) {
+            return Err(WaylandError::Bind(
+                "compositor refused ext-session-lock-v1. Recovery: switch to a tty and \
+                 run `loginctl unlock-session`."
+                    .into(),
+            ));
+        }
+
+        let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
+        for o in outputs {
+            state.add_output(o);
+        }
+
+        wayland_source
+            .insert(loop_handle)
+            .map_err(|e| WaylandError::Connect(format!("calloop insert: {e:?}")))?;
+
+        let result = run_render_loop(&mut state, &mut event_loop);
 
         if let Some(lb) = state.lock_binding.as_mut() {
             lb.close();
         }
-        let _ = event_queue.roundtrip(&mut state);
+        let _ = conn.flush();
 
         result
     }
-}
-
-fn drive_locked_session(
-    state: &mut AppState,
-    event_queue: &mut EventQueue<AppState>,
-) -> Result<(), WaylandError> {
-    // The compositor sends `Locked` only after we commit our first lock-surface
-    // buffers, so we don't wait — roundtrip catches any immediate `Finished`,
-    // then we mint surfaces and let the render loop drive configures + commits.
-    event_queue
-        .roundtrip(state)
-        .map_err(|e| WaylandError::Dispatch(format!("post-lock roundtrip: {e}")))?;
-    if state.lock_binding.as_ref().is_some_and(|lb| lb.finished) {
-        return Err(WaylandError::Bind(
-            "compositor refused ext-session-lock-v1. Recovery: switch to a tty and \
-             run `loginctl unlock-session`."
-                .into(),
-        ));
-    }
-
-    let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
-    for o in outputs {
-        state.add_output(o);
-    }
-
-    run_render_loop(state, event_queue)
 }
 
 fn bind_session_lock_manager(
@@ -247,25 +269,14 @@ fn bind_session_lock_manager(
 
 fn run_render_loop(
     state: &mut AppState,
-    event_queue: &mut EventQueue<AppState>,
+    event_loop: &mut EventLoop<AppState>,
 ) -> Result<(), WaylandError> {
-    // Wait until at least one surface gets its first configure.
-    while !state.any_configured() && !state.terminating() {
-        event_queue
-            .blocking_dispatch(state)
-            .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
-    }
-    if state.terminating() {
-        return Ok(());
-    }
-
-    // Render loop. Each surface flips its own `needs_redraw` from
-    // its frame callback; we render whichever are ready, then
-    // dispatch to wait for the next callback. Order matters: a
-    // dispatch-first loop would block on the first iteration
-    // because the configure event has already been consumed
-    // upstream and no further events arrive until we commit the
-    // first buffer.
+    // Render-then-dispatch ordering is load-bearing: dispatching first
+    // would block on the initial iteration because the configure event
+    // has already been consumed by the pre-insert roundtrip and no
+    // further events arrive until we commit the first buffer. Render
+    // first, then block on dispatch waiting for the next event (frame
+    // callback, key, configure, etc.).
     while !state.terminating() {
         for i in 0..state.surfaces.len() {
             if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
@@ -277,9 +288,9 @@ fn run_render_loop(
         if state.terminating() {
             break;
         }
-        event_queue
-            .blocking_dispatch(state)
-            .map_err(|e| WaylandError::Dispatch(format!("{e}")))?;
+        event_loop
+            .dispatch(None, state)
+            .map_err(|e| WaylandError::Dispatch(format!("calloop dispatch: {e}")))?;
     }
 
     Ok(())
@@ -362,12 +373,6 @@ impl AppState {
         self.should_exit()
             || self.input_dismissed
             || self.lock_binding.as_ref().is_some_and(|lb| lb.finished)
-    }
-
-    fn any_configured(&self) -> bool {
-        self.surfaces
-            .iter()
-            .any(|s| s.configured && s.width > 0 && s.height > 0)
     }
 
     fn handle_input(&mut self) {
