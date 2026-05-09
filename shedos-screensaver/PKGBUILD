@@ -22,6 +22,7 @@ depends=(
     'ttf-dejavu'            # default DejaVu Sans Mono for the Wayland font atlas
     'alsa-lib'              # cpal -> ALSA -> pipewire-alsa loopback (audio capture)
     'pam'                   # libpam for --mode=lock authentication
+    'fprintd'               # pam_fprintd.so for fingerprint unlock at the lock screen
 )
 makedepends=(
     'rust>=1.75'            # workspace builds against rust 2021 edition
@@ -75,6 +76,8 @@ package() {
 
     install -Dm644 tree/etc/pam.d/shedos-screensaver \
         "$pkgdir/etc/pam.d/shedos-screensaver"
+    install -Dm644 tree/etc/pam.d/shedos-screensaver-fp \
+        "$pkgdir/etc/pam.d/shedos-screensaver-fp"
 
     # User-level systemd unit. Started/stopped on demand by hypridle's
     # listener hooks (no [Install] in the unit, so it's not auto-enabled
