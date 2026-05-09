@@ -23,7 +23,8 @@ use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
 use shedos_prompt_ui::{watch as theme_watch, Theme, WidgetCache};
 use shedos_screensaver_wayland::{
-    AuthFn, FrameProducer, LockConfig, ProducerFactory, WaylandConfig, WaylandRenderer,
+    AuthFn, FrameProducer, LockConfig, LockStateConfig, ProducerFactory, WaylandConfig,
+    WaylandRenderer,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -154,6 +155,21 @@ struct Cli {
     /// and scroll for combinations that don't render cleanly.
     #[arg(long)]
     survey: bool,
+
+    /// Lock mode: screensaver dwell before the prompt appears
+    /// (override `[lock] prompt_after_secs` in screensaver.toml).
+    #[arg(long, value_name = "SECS")]
+    prompt_after_secs: Option<u64>,
+
+    /// Lock mode: prompt-idle dwell before it hides
+    /// (override `[lock] prompt_idle_hide_secs` in screensaver.toml).
+    #[arg(long, value_name = "SECS")]
+    prompt_idle_hide_secs: Option<u64>,
+
+    /// Lock mode: prompt-screensaver round-trips before DPMS off
+    /// (override `[lock] prompt_cycles` in screensaver.toml).
+    #[arg(long, value_name = "N")]
+    prompt_cycles: Option<u32>,
 }
 
 fn main() -> ExitCode {
@@ -575,11 +591,17 @@ fn run_lock(
     audio: Option<AudioCapture>,
     exit_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
-    let wallpaper_path = resolve_wallpaper(&cli.wallpaper);
+    let lock_config = build_lock_config(cli)?;
+
+    // The lock-mode Screensaver phase renders on solid Color::BASE
+    // (no wallpaper) so the screensaver effects read clearly without
+    // a translucent wallpaper bleeding through. The Prompt-phase
+    // wallpaper comes from the theme via WidgetCache, independent
+    // of this `wallpaper_path`.
     let cfg = WaylandConfig {
         font_path: cli.font_path.clone(),
         cell_height_px: cli.cell_height_px,
-        wallpaper_path,
+        wallpaper_path: None,
         wallpaper_dim: cli.wallpaper_dim,
         fps_cap: cli.fps.unwrap_or(60).max(1),
         idle_daemon: cli.idle_daemon,
@@ -621,12 +643,11 @@ fn run_lock(
         });
     }
 
-    let lock_config = build_lock_config()?;
     WaylandRenderer::run_locked(cfg, factory, exit_flag, lock_config)
         .map_err(|e| format!("lock: {e}"))
 }
 
-fn build_lock_config() -> Result<LockConfig, String> {
+fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     let username = auth::current_username().map_err(|e| format!("username: {e:#}"))?;
     let theme = Theme::load_or_default();
     let widget_cache =
@@ -642,7 +663,7 @@ fn build_lock_config() -> Result<LockConfig, String> {
         eprintln!("warning: theme watcher disabled: {e:#}");
     }
 
-    let session = auth::PamSession::new("shedos-screensaver", username);
+    let session = auth::PamSession::new("shedos-screensaver", username.clone());
     let authenticate: AuthFn = Box::new(move |password: &str| {
         session.authenticate(password).map_err(|e| {
             eprintln!("shedos-screensaver: pam: {e:?}");
@@ -650,11 +671,72 @@ fn build_lock_config() -> Result<LockConfig, String> {
         })
     });
 
+    let state_config = build_lock_state_config(cli)?;
+
     Ok(LockConfig {
         theme,
         widget_cache,
         authenticate,
         theme_dirty,
+        state_config,
+        username,
+    })
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ScreensaverToml {
+    lock: Option<LockToml>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct LockToml {
+    prompt_after_secs: Option<u64>,
+    prompt_idle_hide_secs: Option<u64>,
+    prompt_cycles: Option<u32>,
+}
+
+fn build_lock_state_config(cli: &Cli) -> Result<LockStateConfig, String> {
+    const DEFAULT_T2: u64 = 300;
+    const DEFAULT_T3: u64 = 120;
+    const DEFAULT_N: u32 = 3;
+    const CONFIG_PATH: &str = "/etc/shedos/screensaver.toml";
+
+    let toml_section = std::fs::read_to_string(CONFIG_PATH)
+        .ok()
+        .and_then(|s| match toml::from_str::<ScreensaverToml>(&s) {
+            Ok(c) => c.lock,
+            Err(e) => {
+                eprintln!(
+                    "warning: {CONFIG_PATH} parse failed ({e}); using defaults"
+                );
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let prompt_after = cli
+        .prompt_after_secs
+        .or(toml_section.prompt_after_secs)
+        .unwrap_or(DEFAULT_T2);
+    let prompt_idle_hide = cli
+        .prompt_idle_hide_secs
+        .or(toml_section.prompt_idle_hide_secs)
+        .unwrap_or(DEFAULT_T3);
+    let prompt_cycles = cli
+        .prompt_cycles
+        .or(toml_section.prompt_cycles)
+        .unwrap_or(DEFAULT_N);
+
+    if prompt_idle_hide == 0 {
+        return Err(
+            "prompt_idle_hide_secs must be > 0; the prompt would be unusable at 0".into(),
+        );
+    }
+
+    Ok(LockStateConfig {
+        prompt_after: Duration::from_secs(prompt_after),
+        prompt_idle_hide: Duration::from_secs(prompt_idle_hide),
+        cycles_before_dpms: prompt_cycles,
     })
 }
 

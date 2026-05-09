@@ -1606,6 +1606,7 @@ dependencies = [
  "pam",
  "rand",
  "rand_chacha",
+ "serde",
  "shedos-prompt-ui",
  "shedos-screensaver-audio",
  "shedos-screensaver-core",
@@ -1614,6 +1615,7 @@ dependencies = [
  "shedos-screensaver-logos",
  "shedos-screensaver-tty",
  "shedos-screensaver-wayland",
+ "toml",
 ]
 
 [[package]]

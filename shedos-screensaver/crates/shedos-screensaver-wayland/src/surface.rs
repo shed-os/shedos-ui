@@ -16,9 +16,10 @@
 use crate::font::FontAtlas;
 use crate::lock::LockBinding;
 use crate::wallpaper::Wallpaper;
+use crate::dpms;
 use crate::{blend_over, pack_argb, AuthFn, FrameProducer, LockConfig, WaylandConfig};
 use shedos_prompt_ui::{OutputRect, PromptState, RenderParams, Theme, WidgetCache};
-use shedos_screensaver_core::{Color, Frame};
+use shedos_screensaver_core::{Color, Frame, LockPhase, LockState};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
@@ -58,6 +59,10 @@ use wayland_client::{
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1::ExtSessionLockManagerV1,
     ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+};
+use wayland_protocols_wlr::output_power_management::v1::client::{
+    zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1,
+    zwlr_output_power_v1::{Mode as DpmsMode, ZwlrOutputPowerV1},
 };
 
 /// Mints frame producers — one per output. Called as outputs are
@@ -116,10 +121,13 @@ impl WaylandRenderer {
             surfaces: Vec::new(),
             is_lock_mode: false,
             lock_binding: None,
+            lock_state: None,
+            dpms_manager: None,
             theme: None,
             widget_cache: None,
             theme_dirty: None,
             authenticate: None,
+            username: None,
             prompt_password: String::new(),
             prompt_capslock: false,
             error: None,
@@ -139,7 +147,7 @@ impl WaylandRenderer {
             .insert(loop_handle)
             .map_err(|e| WaylandError::Connect(format!("calloop insert: {e:?}")))?;
 
-        run_render_loop(&mut state, &mut event_loop)
+        run_loop(&mut state, &mut event_loop)
     }
 
     pub fn run_locked(
@@ -172,7 +180,12 @@ impl WaylandRenderer {
             widget_cache,
             authenticate,
             theme_dirty,
+            state_config,
+            username,
         } = lock_config;
+
+        let now = Instant::now();
+        let lock_state = LockState::new(state_config, now);
 
         let mut state = AppState {
             registry_state,
@@ -194,10 +207,13 @@ impl WaylandRenderer {
             surfaces: Vec::new(),
             is_lock_mode: true,
             lock_binding: None,
+            lock_state: Some(lock_state),
+            dpms_manager: None,
             theme: Some(theme),
             widget_cache: Some(widget_cache),
             theme_dirty: Some(theme_dirty),
             authenticate: Some(authenticate),
+            username: Some(username),
             prompt_password: String::new(),
             prompt_capslock: false,
             error: None,
@@ -217,6 +233,14 @@ impl WaylandRenderer {
             .queue()
             .roundtrip(&mut state)
             .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
+
+        state.dpms_manager = dpms::bind_manager(&globals, &qh);
+        if state.dpms_manager.is_none() {
+            eprintln!(
+                "shedos-screensaver: zwlr_output_power_manager_v1 not advertised; \
+                 monitors will not power off"
+            );
+        }
 
         let manager: ExtSessionLockManagerV1 = bind_session_lock_manager(&globals, &qh)?;
         let lock = manager.lock(&qh, ());
@@ -247,7 +271,7 @@ impl WaylandRenderer {
             .insert(loop_handle)
             .map_err(|e| WaylandError::Connect(format!("calloop insert: {e:?}")))?;
 
-        let result = run_render_loop(&mut state, &mut event_loop);
+        let result = run_loop(&mut state, &mut event_loop);
 
         if let Some(lb) = state.lock_binding.as_mut() {
             lb.close();
@@ -267,7 +291,7 @@ fn bind_session_lock_manager(
         .map_err(|e| WaylandError::Bind(format!("ext_session_lock_manager_v1: {e}")))
 }
 
-fn run_render_loop(
+fn run_loop(
     state: &mut AppState,
     event_loop: &mut EventLoop<AppState>,
 ) -> Result<(), WaylandError> {
@@ -276,8 +300,21 @@ fn run_render_loop(
     // has already been consumed by the pre-insert roundtrip and no
     // further events arrive until we commit the first buffer. Render
     // first, then block on dispatch waiting for the next event (frame
-    // callback, key, configure, etc.).
+    // callback, key, configure, state-machine deadline, etc.).
     while !state.terminating() {
+        // In lock mode, advance the state machine and react to any
+        // phase change before rendering — the new phase decides what
+        // gets drawn.
+        let transition = state.lock_state.as_mut().and_then(|ls| {
+            let prev = ls.phase();
+            ls.tick(Instant::now());
+            let curr = ls.phase();
+            (prev != curr).then_some((prev, curr))
+        });
+        if let Some((from, to)) = transition {
+            state.on_phase_change(from, to);
+        }
+
         for i in 0..state.surfaces.len() {
             if state.surfaces[i].needs_redraw && state.surfaces[i].configured {
                 state.render_surface(i)?;
@@ -288,8 +325,17 @@ fn run_render_loop(
         if state.terminating() {
             break;
         }
+
+        // Sleep exactly until the next state-machine deadline (or
+        // until a Wayland event arrives, whichever first). In layer-
+        // shell mode lock_state is None so we just wait for events.
+        let timeout = state
+            .lock_state
+            .as_ref()
+            .and_then(|ls| ls.time_until_next_transition(Instant::now()));
+
         event_loop
-            .dispatch(None, state)
+            .dispatch(timeout, state)
             .map_err(|e| WaylandError::Dispatch(format!("calloop dispatch: {e}")))?;
     }
 
@@ -333,6 +379,7 @@ struct OutputSurface {
     frame: Frame,
     producer: Box<dyn FrameProducer>,
     needs_redraw: bool,
+    dpms_power: Option<ZwlrOutputPowerV1>,
 }
 
 pub(crate) struct AppState {
@@ -355,10 +402,13 @@ pub(crate) struct AppState {
     surfaces: Vec<OutputSurface>,
     is_lock_mode: bool,
     pub(crate) lock_binding: Option<LockBinding>,
+    lock_state: Option<LockState>,
+    dpms_manager: Option<ZwlrOutputPowerManagerV1>,
     theme: Option<Theme>,
     widget_cache: Option<WidgetCache>,
     theme_dirty: Option<Arc<AtomicBool>>,
     authenticate: Option<AuthFn>,
+    username: Option<String>,
     prompt_password: String,
     prompt_capslock: bool,
     error: Option<(Instant, String)>,
@@ -399,6 +449,36 @@ impl AppState {
         match auth(&password) {
             Ok(()) => self.should_exit.store(true, Ordering::Release),
             Err(msg) => self.error = Some((Instant::now() + ERROR_HOLD, msg)),
+        }
+        self.mark_all_dirty();
+    }
+
+    fn on_phase_change(&mut self, from: LockPhase, to: LockPhase) {
+        if from == LockPhase::Dpms {
+            for s in &self.surfaces {
+                if let Some(p) = &s.dpms_power {
+                    p.set_mode(DpmsMode::On);
+                }
+            }
+        }
+        match to {
+            LockPhase::Screensaver => {
+                // Mint a fresh producer per surface so animations
+                // don't fast-forward through the prompt-phase gap.
+                for s in self.surfaces.iter_mut() {
+                    s.producer = (self.producer_factory)();
+                }
+            }
+            LockPhase::Prompt => {
+                self.prompt_password.clear();
+            }
+            LockPhase::Dpms => {
+                for s in &self.surfaces {
+                    if let Some(p) = &s.dpms_power {
+                        p.set_mode(DpmsMode::Off);
+                    }
+                }
+            }
         }
         self.mark_all_dirty();
     }
@@ -448,6 +528,7 @@ impl AppState {
             frame: Frame::new(0, 0),
             producer: (self.producer_factory)(),
             needs_redraw: true,
+            dpms_power: None,
         });
     }
 
@@ -461,6 +542,11 @@ impl AppState {
         let Some(pool) = self.new_pool() else {
             return;
         };
+
+        let dpms_power = self
+            .dpms_manager
+            .as_ref()
+            .map(|m| m.get_output_power(&output, &self.qh, ()));
 
         self.surfaces.push(OutputSurface {
             output,
@@ -477,6 +563,7 @@ impl AppState {
             frame: Frame::new(0, 0),
             producer: (self.producer_factory)(),
             needs_redraw: true,
+            dpms_power,
         });
     }
 
@@ -557,12 +644,109 @@ impl AppState {
         if idx >= self.surfaces.len() {
             return Ok(());
         }
-        if self.is_lock_mode {
-            return self.render_lock_surface(idx);
+
+        let phase = self.lock_state.as_ref().map(|s| s.phase());
+        if matches!(phase, Some(LockPhase::Dpms)) {
+            return Ok(());
         }
 
-        // Borrow split: &self.font / &self.wallpaper_path / &self.qh
-        // are read-only; the OutputSurface at idx is mutable.
+        // Theme reload + stale-error decay (lock mode only).
+        if self.is_lock_mode {
+            if let Some(dirty) = &self.theme_dirty {
+                if dirty.swap(false, Ordering::AcqRel) {
+                    if let Some(theme) = self.theme.as_mut() {
+                        *theme = Theme::load_or_default();
+                        if let Some(cache) = self.widget_cache.as_mut() {
+                            let _ = cache.refresh_wallpaper(theme);
+                        }
+                    }
+                }
+            }
+            if let Some((t, _)) = self.error.as_ref() {
+                if Instant::now() >= *t {
+                    self.error = None;
+                }
+            }
+        }
+
+        // Lock mode Prompt phase → prompt UI only, no screensaver
+        // running behind it. Every other case (layer-shell mode and
+        // lock-mode Screensaver phase) renders the full screensaver.
+        if self.is_lock_mode && matches!(phase, Some(LockPhase::Prompt)) {
+            self.render_lock_prompt(idx)
+        } else {
+            self.render_screensaver_content(idx)
+        }
+    }
+
+    fn render_lock_prompt(&mut self, idx: usize) -> Result<(), WaylandError> {
+        let s = &mut self.surfaces[idx];
+        if s.width == 0 || s.height == 0 {
+            return Ok(());
+        }
+        let (Some(theme), Some(cache)) =
+            (self.theme.as_ref(), self.widget_cache.as_mut())
+        else {
+            return Ok(());
+        };
+
+        let stride = (s.width as i32) * 4;
+        let (buffer, canvas) = s
+            .pool
+            .create_buffer(
+                s.width as i32,
+                s.height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
+            .map_err(|e| WaylandError::Pool(format!("create_buffer: {e}")))?;
+
+        let active_error = self
+            .error
+            .as_ref()
+            .filter(|(t, _)| Instant::now() < *t);
+        let prompt_state = PromptState {
+            typed_chars: self.prompt_password.chars().count(),
+            fail: active_error.is_some(),
+            success: false,
+            capslock: self.prompt_capslock,
+        };
+        let greeting = self
+            .username
+            .as_ref()
+            .map(|n| format!("Hi, {n}"))
+            .unwrap_or_else(|| "Hi".to_string());
+        let params = RenderParams {
+            greeting: Some(greeting.as_str()),
+            error_message: active_error.map(|(_, m)| m.as_str()),
+        };
+        let rect = OutputRect {
+            x: 0,
+            y: 0,
+            w: s.width as i32,
+            h: s.height as i32,
+        };
+        shedos_prompt_ui::render(
+            canvas,
+            s.width,
+            s.height,
+            &[rect],
+            &prompt_state,
+            theme,
+            cache,
+            &params,
+        );
+
+        let surface = s.shell.wl_surface().clone();
+        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
+        buffer
+            .attach_to(&surface)
+            .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
+        s.shell.commit();
+        Ok(())
+    }
+
+    fn render_screensaver_content(&mut self, idx: usize) -> Result<(), WaylandError> {
         let s = &mut self.surfaces[idx];
         if s.width == 0 || s.height == 0 {
             return Ok(());
@@ -650,88 +834,6 @@ impl AppState {
                 }
             }
         }
-
-        let surface = s.shell.wl_surface().clone();
-        surface.frame(&self.qh, surface.clone());
-        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
-        buffer
-            .attach_to(&surface)
-            .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
-        s.shell.commit();
-        Ok(())
-    }
-
-    fn render_lock_surface(&mut self, idx: usize) -> Result<(), WaylandError> {
-        if let Some(dirty) = &self.theme_dirty {
-            if dirty.swap(false, Ordering::AcqRel) {
-                if let Some(theme) = self.theme.as_mut() {
-                    *theme = Theme::load_or_default();
-                    if let Some(cache) = self.widget_cache.as_mut() {
-                        let _ = cache.refresh_wallpaper(theme);
-                    }
-                }
-            }
-        }
-        if let Some((t, _)) = self.error.as_ref() {
-            if Instant::now() >= *t {
-                self.error = None;
-            }
-        }
-
-        let s = &mut self.surfaces[idx];
-        if s.width == 0 || s.height == 0 {
-            return Ok(());
-        }
-
-        let stride = (s.width as i32) * 4;
-        let (buffer, canvas) = s
-            .pool
-            .create_buffer(
-                s.width as i32,
-                s.height as i32,
-                stride,
-                wl_shm::Format::Argb8888,
-            )
-            .map_err(|e| WaylandError::Pool(format!("create_buffer: {e}")))?;
-
-        let Some(theme) = self.theme.as_ref() else {
-            return Ok(());
-        };
-        let Some(cache) = self.widget_cache.as_mut() else {
-            return Ok(());
-        };
-
-        let active_error = self
-            .error
-            .as_ref()
-            .filter(|(t, _)| Instant::now() < *t);
-        let prompt_state = PromptState {
-            typed_chars: self.prompt_password.chars().count(),
-            fail: active_error.is_some(),
-            success: false,
-            capslock: self.prompt_capslock,
-        };
-        let params = RenderParams {
-            greeting: None,
-            error_message: active_error.map(|(_, m)| m.as_str()),
-        };
-        let rect = OutputRect {
-            x: 0,
-            y: 0,
-            w: s.width as i32,
-            h: s.height as i32,
-        };
-
-        shedos_prompt_ui::render(
-            canvas,
-            s.width,
-            s.height,
-            &[rect],
-            &prompt_state,
-            theme,
-            cache,
-            &params,
-        );
 
         let surface = s.shell.wl_surface().clone();
         surface.frame(&self.qh, surface.clone());
@@ -913,6 +1015,20 @@ impl KeyboardHandler for AppState {
             self.handle_input();
             return;
         }
+
+        // Feed the input into the state machine first so a keypress
+        // in Screensaver or Dpms transitions to Prompt before we
+        // decide what to do with the key itself.
+        let transition = self.lock_state.as_mut().and_then(|ls| {
+            let prev = ls.phase();
+            ls.on_input(Instant::now());
+            let curr = ls.phase();
+            (prev != curr).then_some((prev, curr))
+        });
+        if let Some((from, to)) = transition {
+            self.on_phase_change(from, to);
+        }
+
         match event.keysym {
             Keysym::Return | Keysym::KP_Enter => self.submit_password(),
             Keysym::BackSpace => {

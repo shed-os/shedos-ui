@@ -46,6 +46,8 @@ realfft = "3"
 libc = "0.2"
 pam = "0.8"
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 shedos-prompt-ui = { path = "../shedos-prompt-ui" }
 shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }

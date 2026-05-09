@@ -60,3 +60,22 @@ locale = ""
 # Example to limit to fast-paced effects:
 #   cycle = ["rain", "scattered", "matrix-rain", "glitch"]
 cycle = []
+
+[lock]
+# Settings for `shedos-screensaver --mode=lock`. Each is overridable
+# from the CLI via --prompt-after-secs / --prompt-idle-hide-secs /
+# --prompt-cycles.
+
+# Screensaver dwell after the lock engages, before the password prompt
+# appears automatically. A keypress brings the prompt up early.
+prompt_after_secs = 300
+
+# Idle dwell while the prompt is visible before it hides and the
+# screensaver resumes. Reset by every keystroke.
+prompt_idle_hide_secs = 120
+
+# Prompt-screensaver round-trips before the lock screen powers
+# monitors off via wlr-output-power-management. Each completed round
+# trip increments; on the next Screensaver entry past this count the
+# state machine transitions to DPMS off until input wakes the panel.
+prompt_cycles = 3

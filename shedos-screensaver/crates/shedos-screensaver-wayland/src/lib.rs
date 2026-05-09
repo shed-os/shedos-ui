@@ -23,6 +23,7 @@ mod wallpaper;
 
 pub use font::FontAtlas;
 pub use shedos_prompt_ui::{Theme, WidgetCache};
+pub use shedos_screensaver_core::LockStateConfig;
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
@@ -38,6 +39,8 @@ pub struct LockConfig {
     pub widget_cache: WidgetCache,
     pub authenticate: AuthFn,
     pub theme_dirty: Arc<AtomicBool>,
+    pub state_config: LockStateConfig,
+    pub username: String,
 }
 
 /// Configuration handed to [`WaylandRenderer::run`].
