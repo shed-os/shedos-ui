@@ -1,0 +1,12 @@
+[Unit]
+Description=ShedOS lock screen (ext-session-lock-v1 client)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/shedos-screensaver --mode=lock
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60

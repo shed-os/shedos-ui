@@ -85,6 +85,8 @@ package() {
     # pkill string-matched lifecycle.
     install -Dm644 tree/usr/lib/systemd/user/shedos-screensaver.service \
         "$pkgdir/usr/lib/systemd/user/shedos-screensaver.service"
+    install -Dm644 tree/usr/lib/systemd/user/shedos-screensaver-lock.service \
+        "$pkgdir/usr/lib/systemd/user/shedos-screensaver-lock.service"
 
     install -Dm644 man/build/shedman-screensaver.1 \
         "$pkgdir/usr/share/man/man1/shedman-screensaver.1"
