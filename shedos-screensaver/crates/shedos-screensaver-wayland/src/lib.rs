@@ -15,6 +15,7 @@
 //! runtime dep, and removes the entire class of "GPU not available
 //! on this iGPU" failures. If perf becomes an issue we can revisit.
 
+mod dpms;
 mod font;
 mod lock;
 mod surface;
