@@ -16,7 +16,8 @@
 use crate::font::FontAtlas;
 use crate::lock::LockBinding;
 use crate::wallpaper::Wallpaper;
-use crate::{blend_over, pack_argb, FrameProducer, WaylandConfig};
+use crate::{blend_over, pack_argb, AuthFn, FrameProducer, LockConfig, WaylandConfig};
+use shedos_prompt_ui::{OutputRect, PromptState, RenderParams, Theme, WidgetCache};
 use shedos_screensaver_core::{Color, Frame};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -42,7 +43,9 @@ use smithay_client_toolkit::{
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const ERROR_HOLD: Duration = Duration::from_secs(2);
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
     protocol::{wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
@@ -109,11 +112,16 @@ impl WaylandRenderer {
             surfaces: Vec::new(),
             is_lock_mode: false,
             lock_binding: None,
+            theme: None,
+            widget_cache: None,
+            theme_dirty: None,
+            authenticate: None,
+            prompt_password: String::new(),
+            prompt_capslock: false,
+            error: None,
         };
         let _ = config.fps_cap;
 
-        // Drain the queue once so OutputHandler::new_output fires for
-        // every output already advertised at startup.
         event_queue
             .roundtrip(&mut state)
             .map_err(|e| WaylandError::Dispatch(format!("initial roundtrip: {e}")))?;
@@ -125,6 +133,7 @@ impl WaylandRenderer {
         config: WaylandConfig,
         producer_factory: ProducerFactory,
         should_exit: Arc<AtomicBool>,
+        lock_config: LockConfig,
     ) -> Result<(), WaylandError> {
         let conn = Connection::connect_to_env()
             .map_err(|e| WaylandError::Connect(format!("{e}")))?;
@@ -144,6 +153,13 @@ impl WaylandRenderer {
 
         let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
             .map_err(|e| WaylandError::Font(format!("{e}")))?;
+
+        let LockConfig {
+            theme,
+            widget_cache,
+            authenticate,
+            theme_dirty,
+        } = lock_config;
 
         let mut state = AppState {
             registry_state,
@@ -165,6 +181,13 @@ impl WaylandRenderer {
             surfaces: Vec::new(),
             is_lock_mode: true,
             lock_binding: None,
+            theme: Some(theme),
+            widget_cache: Some(widget_cache),
+            theme_dirty: Some(theme_dirty),
+            authenticate: Some(authenticate),
+            prompt_password: String::new(),
+            prompt_capslock: false,
+            error: None,
         };
         let _ = config.fps_cap;
 
@@ -321,6 +344,13 @@ pub(crate) struct AppState {
     surfaces: Vec<OutputSurface>,
     is_lock_mode: bool,
     pub(crate) lock_binding: Option<LockBinding>,
+    theme: Option<Theme>,
+    widget_cache: Option<WidgetCache>,
+    theme_dirty: Option<Arc<AtomicBool>>,
+    authenticate: Option<AuthFn>,
+    prompt_password: String,
+    prompt_capslock: bool,
+    error: Option<(Instant, String)>,
 }
 
 impl AppState {
@@ -345,6 +375,27 @@ impl AppState {
             return;
         }
         self.input_dismissed = true;
+    }
+
+    fn mark_all_dirty(&mut self) {
+        for s in self.surfaces.iter_mut() {
+            s.needs_redraw = true;
+        }
+    }
+
+    fn submit_password(&mut self) {
+        let Some(auth) = self.authenticate.as_ref() else {
+            return;
+        };
+        let password = std::mem::take(&mut self.prompt_password);
+        if password.is_empty() {
+            return;
+        }
+        match auth(&password) {
+            Ok(()) => self.should_exit.store(true, Ordering::Release),
+            Err(msg) => self.error = Some((Instant::now() + ERROR_HOLD, msg)),
+        }
+        self.mark_all_dirty();
     }
 
     fn add_output(&mut self, output: WlOutput) {
@@ -501,6 +552,9 @@ impl AppState {
         if idx >= self.surfaces.len() {
             return Ok(());
         }
+        if self.is_lock_mode {
+            return self.render_lock_surface(idx);
+        }
 
         // Borrow split: &self.font / &self.wallpaper_path / &self.qh
         // are read-only; the OutputSurface at idx is mutable.
@@ -591,6 +645,88 @@ impl AppState {
                 }
             }
         }
+
+        let surface = s.shell.wl_surface().clone();
+        surface.frame(&self.qh, surface.clone());
+        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
+        buffer
+            .attach_to(&surface)
+            .map_err(|e| WaylandError::Buffer(format!("attach: {e}")))?;
+        s.shell.commit();
+        Ok(())
+    }
+
+    fn render_lock_surface(&mut self, idx: usize) -> Result<(), WaylandError> {
+        if let Some(dirty) = &self.theme_dirty {
+            if dirty.swap(false, Ordering::AcqRel) {
+                if let Some(theme) = self.theme.as_mut() {
+                    *theme = Theme::load_or_default();
+                    if let Some(cache) = self.widget_cache.as_mut() {
+                        let _ = cache.refresh_wallpaper(theme);
+                    }
+                }
+            }
+        }
+        if let Some((t, _)) = self.error.as_ref() {
+            if Instant::now() >= *t {
+                self.error = None;
+            }
+        }
+
+        let s = &mut self.surfaces[idx];
+        if s.width == 0 || s.height == 0 {
+            return Ok(());
+        }
+
+        let stride = (s.width as i32) * 4;
+        let (buffer, canvas) = s
+            .pool
+            .create_buffer(
+                s.width as i32,
+                s.height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
+            .map_err(|e| WaylandError::Pool(format!("create_buffer: {e}")))?;
+
+        let Some(theme) = self.theme.as_ref() else {
+            return Ok(());
+        };
+        let Some(cache) = self.widget_cache.as_mut() else {
+            return Ok(());
+        };
+
+        let active_error = self
+            .error
+            .as_ref()
+            .filter(|(t, _)| Instant::now() < *t);
+        let prompt_state = PromptState {
+            typed_chars: self.prompt_password.chars().count(),
+            fail: active_error.is_some(),
+            success: false,
+            capslock: self.prompt_capslock,
+        };
+        let params = RenderParams {
+            greeting: None,
+            error_message: active_error.map(|(_, m)| m.as_str()),
+        };
+        let rect = OutputRect {
+            x: 0,
+            y: 0,
+            w: s.width as i32,
+            h: s.height as i32,
+        };
+
+        shedos_prompt_ui::render(
+            canvas,
+            s.width,
+            s.height,
+            &[rect],
+            &prompt_state,
+            theme,
+            cache,
+            &params,
+        );
 
         let surface = s.shell.wl_surface().clone();
         surface.frame(&self.qh, surface.clone());
@@ -766,9 +902,31 @@ impl KeyboardHandler for AppState {
         _qh: &QueueHandle<Self>,
         _keyboard: &WlKeyboard,
         _serial: u32,
-        _event: KeyEvent,
+        event: KeyEvent,
     ) {
-        self.handle_input();
+        if !self.is_lock_mode {
+            self.handle_input();
+            return;
+        }
+        match event.keysym {
+            Keysym::Return | Keysym::KP_Enter => self.submit_password(),
+            Keysym::BackSpace => {
+                self.prompt_password.pop();
+                self.mark_all_dirty();
+            }
+            Keysym::Escape => {
+                self.prompt_password.clear();
+                self.mark_all_dirty();
+            }
+            _ => {
+                if let Some(s) = event.utf8.as_deref() {
+                    if !s.is_empty() && !s.chars().any(|c| c.is_control()) {
+                        self.prompt_password.push_str(s);
+                        self.mark_all_dirty();
+                    }
+                }
+            }
+        }
     }
     fn release_key(
         &mut self,
@@ -784,9 +942,14 @@ impl KeyboardHandler for AppState {
         _qh: &QueueHandle<Self>,
         _keyboard: &WlKeyboard,
         _serial: u32,
-        _modifiers: Modifiers,
+        modifiers: Modifiers,
         _layout: u32,
-    ) {}
+    ) {
+        if self.is_lock_mode && self.prompt_capslock != modifiers.caps_lock {
+            self.prompt_capslock = modifiers.caps_lock;
+            self.mark_all_dirty();
+        }
+    }
 }
 
 impl PointerHandler for AppState {

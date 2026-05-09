@@ -43,7 +43,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 cpal = "0.15"
 realfft = "3"
 libc = "0.2"
+pam = "0.8"
+anyhow = "1"
 
+shedos-prompt-ui = { path = "../shedos-prompt-ui" }
 shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
 shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
 shedos-screensaver-logos = { path = "crates/shedos-screensaver-logos" }

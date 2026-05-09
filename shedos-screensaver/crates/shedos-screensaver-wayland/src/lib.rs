@@ -21,11 +21,23 @@ mod surface;
 mod wallpaper;
 
 pub use font::FontAtlas;
+pub use shedos_prompt_ui::{Theme, WidgetCache};
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
 use shedos_screensaver_core::{Color, Frame};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
+pub type AuthFn = Box<dyn Fn(&str) -> Result<(), String>>;
+
+pub struct LockConfig {
+    pub theme: Theme,
+    pub widget_cache: WidgetCache,
+    pub authenticate: AuthFn,
+    pub theme_dirty: Arc<AtomicBool>,
+}
 
 /// Configuration handed to [`WaylandRenderer::run`].
 pub struct WaylandConfig {
