@@ -54,6 +54,28 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const ERROR_HOLD: Duration = Duration::from_secs(2);
+
+/// How long the fingerprint icon stays in its post-attempt color
+/// before fading back to Idle (Failure) or releasing the lock
+/// (Success). Both dwell long enough for the user to register the
+/// state — 300ms was empirically too brief; the wayland frame
+/// double-buffer + compositor scheduling could swallow the green
+/// frame before the user noticed it.
+const FP_FAILURE_HOLD: Duration = Duration::from_millis(1000);
+const FP_SUCCESS_HOLD: Duration = Duration::from_millis(900);
+
+/// Catppuccin Mocha green (the theme palette doesn't carry a `green`
+/// field today, so we hardcode the Mocha shade here. If a future
+/// theme schema adds `green`, swap this for `theme.green`).
+const FP_SUCCESS_GREEN_ARGB: u32 = 0xFFA6E3A1;
+
+#[derive(Clone, Copy, Default)]
+enum FingerprintStatus {
+    #[default]
+    Idle,
+    Failure(Instant),
+    Success(Instant),
+}
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
     protocol::{wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
@@ -136,6 +158,7 @@ impl WaylandRenderer {
             error: None,
             fingerprint_rx: None,
             fingerprint_hint: None,
+            fingerprint_status: FingerprintStatus::Idle,
         };
         let _ = config.fps_cap;
 
@@ -230,6 +253,7 @@ impl WaylandRenderer {
             error: None,
             fingerprint_rx,
             fingerprint_hint,
+            fingerprint_status: FingerprintStatus::Idle,
         };
         let _ = config.fps_cap;
 
@@ -328,24 +352,39 @@ fn run_loop(
     // callback, key, configure, state-machine deadline, etc.).
     while !state.terminating() {
         // Drain any pending fingerprint-thread results. A successful
-        // scan unlocks; a failed one flashes the error string on the
-        // prompt and lets the user retry (the fingerprint thread's
-        // own loop will re-arm for the next attempt). Drained into a
-        // Vec first so the rx borrow is released before we mutate
-        // other AppState fields below.
-        let fp_results: Vec<Result<(), String>> = state
+        // scan flashes the icon green for FP_SUCCESS_HOLD and then
+        // unlocks; a failed scan flashes red for FP_FAILURE_HOLD and
+        // returns to Idle. We deliberately do NOT surface fingerprint
+        // failures on the prompt's error line — that's the password
+        // input's slot, and a finger-not-recognized event isn't a
+        // "wrong password" the user needs a banner for. The icon
+        // color change IS the feedback.
+        let now = Instant::now();
+        let fp_results: Vec<Result<(), ()>> = state
             .fingerprint_rx
             .as_ref()
             .map(|rx| rx.try_iter().collect())
             .unwrap_or_default();
         for result in fp_results {
-            match result {
-                Ok(()) => state.should_exit.store(true, Ordering::Release),
-                Err(msg) => {
-                    state.error = Some((Instant::now() + ERROR_HOLD, msg));
-                    state.mark_all_dirty();
-                }
+            state.fingerprint_status = match result {
+                Ok(()) => FingerprintStatus::Success(now + FP_SUCCESS_HOLD),
+                Err(()) => FingerprintStatus::Failure(now + FP_FAILURE_HOLD),
+            };
+            state.mark_all_dirty();
+        }
+        // Honor the post-attempt dwell: clear an expired Failure back
+        // to Idle (and redraw); release the lock when the Success
+        // dwell expires (the green flash is visible for at least one
+        // render before the surface tears down).
+        match state.fingerprint_status {
+            FingerprintStatus::Failure(until) if Instant::now() >= until => {
+                state.fingerprint_status = FingerprintStatus::Idle;
+                state.mark_all_dirty();
             }
+            FingerprintStatus::Success(until) if Instant::now() >= until => {
+                state.should_exit.store(true, Ordering::Release);
+            }
+            _ => {}
         }
 
         // In lock mode, advance the state machine and react to any
@@ -372,13 +411,27 @@ fn run_loop(
             break;
         }
 
-        // Sleep exactly until the next state-machine deadline (or
-        // until a Wayland event arrives, whichever first). In layer-
-        // shell mode lock_state is None so we just wait for events.
-        let timeout = state
+        // Sleep exactly until the next state-machine deadline OR the
+        // fingerprint-status dwell expires (whichever first), or
+        // until a Wayland event arrives. In layer-shell mode
+        // lock_state is None so we just wait for events.
+        let now = Instant::now();
+        let lock_timeout = state
             .lock_state
             .as_ref()
-            .and_then(|ls| ls.time_until_next_transition(Instant::now()));
+            .and_then(|ls| ls.time_until_next_transition(now));
+        let fp_timeout = match state.fingerprint_status {
+            FingerprintStatus::Idle => None,
+            FingerprintStatus::Failure(until) | FingerprintStatus::Success(until) => {
+                Some(until.saturating_duration_since(now))
+            }
+        };
+        let timeout = match (lock_timeout, fp_timeout) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
 
         event_loop
             .dispatch(timeout, state)
@@ -458,8 +511,9 @@ pub(crate) struct AppState {
     prompt_password: String,
     prompt_capslock: bool,
     error: Option<(Instant, String)>,
-    fingerprint_rx: Option<Receiver<Result<(), String>>>,
+    fingerprint_rx: Option<Receiver<Result<(), ()>>>,
     fingerprint_hint: Option<String>,
+    fingerprint_status: FingerprintStatus,
 }
 
 impl AppState {
@@ -764,10 +818,25 @@ impl AppState {
             .as_ref()
             .map(|n| format!("Hi, {n}"))
             .unwrap_or_else(|| "Hi".to_string());
+        let fingerprint = self.fingerprint_hint.as_deref().map(|idle_hint| {
+            // Color + hint vary by post-attempt state so the user sees
+            // immediate visual feedback that the system registered
+            // their finger (vs the icon being a static decoration).
+            let (icon_color_argb, hint) = match self.fingerprint_status {
+                FingerprintStatus::Idle => (theme.accent, idle_hint),
+                FingerprintStatus::Failure(_) => {
+                    (theme.red, "Fingerprint not recognized — try again")
+                }
+                FingerprintStatus::Success(_) => {
+                    (FP_SUCCESS_GREEN_ARGB, "Fingerprint recognized")
+                }
+            };
+            shedos_prompt_ui::FingerprintRender { hint, icon_color_argb }
+        });
         let params = RenderParams {
             greeting: Some(greeting.as_str()),
             error_message: active_error.map(|(_, m)| m.as_str()),
-            fingerprint_hint: self.fingerprint_hint.as_deref(),
+            fingerprint,
         };
         let rect = OutputRect {
             x: 0,

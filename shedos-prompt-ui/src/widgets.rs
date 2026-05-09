@@ -4,6 +4,7 @@
 //! supplies the prompt input state and pre-loaded font faces / theme.
 
 use crate::primitives::{draw_fingerprint_icon, draw_rounded_box};
+use crate::FingerprintRender;
 use crate::text::FontFace;
 use crate::theme::Theme;
 use crate::{OutputRect, PromptState};
@@ -43,7 +44,7 @@ pub fn paint_widgets(
     bold: &FontFace,
     error_message: Option<&str>,
     greeting: Option<&str>,
-    fingerprint_hint: Option<&str>,
+    fingerprint: Option<&FingerprintRender<'_>>,
 ) {
     let (px, py, pw, ph) = (output_rect.x, output_rect.y, output_rect.w, output_rect.h);
     let text_color = rgb(theme.text);
@@ -89,11 +90,12 @@ pub fn paint_widgets(
         border, 0xee,
     );
 
-    if fingerprint_hint.is_some() {
+    if let Some(fp) = fingerprint {
         let icon_cx = (box_x as f32) - (FP_ICON_GAP as f32) - (FP_ICON_SIZE / 2.0);
         let icon_cy = (box_y + INPUT_H as i32 / 2) as f32;
         draw_fingerprint_icon(
-            canvas, canvas_w, icon_cx, icon_cy, FP_ICON_SIZE, accent_color, 0xee,
+            canvas, canvas_w, icon_cx, icon_cy, FP_ICON_SIZE,
+            rgb(fp.icon_color_argb), 0xee,
         );
     }
 
@@ -141,12 +143,12 @@ pub fn paint_widgets(
     // Fingerprint hint sits one line below the greeting/error in
     // muted text so it reads as secondary affordance, not the main
     // call-to-action.
-    if let Some(hint) = fingerprint_hint {
+    if let Some(fp) = fingerprint {
         let hint_y = line_y + GREET_PX as i32 + 8;
-        let hint_w = regular.measure_width(hint, FP_HINT_PX);
+        let hint_w = regular.measure_width(fp.hint, FP_HINT_PX);
         let hint_x = px + (pw - hint_w) / 2;
         regular.render(
-            hint, FP_HINT_PX, hint_x, hint_y, text_color, 0x99,
+            fp.hint, FP_HINT_PX, hint_x, hint_y, text_color, 0x99,
             canvas, canvas_w, canvas_h,
         );
     }

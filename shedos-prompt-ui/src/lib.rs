@@ -93,7 +93,18 @@ pub struct RenderParams<'a> {
     /// When `Some`, paints a fingerprint icon to the left of the
     /// prompt input and shows the hint string under the prompt as
     /// a secondary line. None → no fingerprint affordance.
-    pub fingerprint_hint: Option<&'a str>,
+    pub fingerprint: Option<FingerprintRender<'a>>,
+}
+
+/// Visual state of the fingerprint affordance for a single frame.
+/// Caller computes color + hint text from auth-thread state so the
+/// renderer stays purely presentational. `icon_color_argb` is the
+/// 0xAARRGGBB value the icon strokes are painted in; the hint string
+/// is the secondary line below the greeting.
+#[derive(Debug, Clone, Copy)]
+pub struct FingerprintRender<'a> {
+    pub hint: &'a str,
+    pub icon_color_argb: u32,
 }
 
 /// Paint a wallpaper-and-widgets composition for every output rect.
@@ -153,7 +164,7 @@ pub fn render(
             &cache.bold,
             params.error_message,
             params.greeting,
-            params.fingerprint_hint,
+            params.fingerprint.as_ref(),
         );
     }
 }

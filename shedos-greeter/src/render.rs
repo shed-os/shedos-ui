@@ -281,6 +281,7 @@ impl App {
             &RenderParams {
                 greeting: Some(greeting.as_str()),
                 error_message: error_msg,
+                fingerprint: None,
             },
         );
 

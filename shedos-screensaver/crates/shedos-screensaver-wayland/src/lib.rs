@@ -54,7 +54,14 @@ pub struct LockConfig {
 }
 
 pub struct FingerprintConfig {
-    pub rx: Receiver<Result<(), String>>,
+    /// Channel of fingerprint-thread attempt outcomes. `Ok(())` means
+    /// the PAM stack accepted the scan and the lock should release;
+    /// `Err(())` means the attempt failed for any reason and the lock
+    /// loop should drop it silently (the thread already logged the
+    /// raw PAM code via stderr). Carrying no string keeps the
+    /// fingerprint failure path from accidentally feeding the
+    /// password prompt's error slot.
+    pub rx: Receiver<Result<(), ()>>,
     pub ping_source: calloop_ping::PingSource,
     pub hint_text: String,
 }
