@@ -29,7 +29,7 @@ impl AudioFrame {
     /// Convenience: average magnitude across the bottom `n` bands
     /// (treat as "bass energy").
     pub fn bass(&self, n: usize) -> f32 {
-        let n = n.min(NUM_BANDS).max(1);
+        let n = n.clamp(1, NUM_BANDS);
         self.bands[..n].iter().sum::<f32>() / n as f32
     }
 

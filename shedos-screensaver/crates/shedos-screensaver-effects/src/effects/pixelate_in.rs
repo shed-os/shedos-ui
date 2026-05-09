@@ -74,8 +74,8 @@ impl Effect for PixelateIn {
         // whole block with '█' in that average color.
         for &scale in &SCALES[..SCALES.len() - 1] {
             let mut stage_cells: Vec<ResolvedCell> = Vec::new();
-            let block_rows = (target.rows() + scale - 1) / scale;
-            let block_cols = (target.cols() + scale - 1) / scale;
+            let block_rows = target.rows().div_ceil(scale);
+            let block_cols = target.cols().div_ceil(scale);
             for br in 0..block_rows {
                 for bc in 0..block_cols {
                     let r0 = br * scale;

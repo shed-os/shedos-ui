@@ -78,8 +78,13 @@ impl Analyzer {
 
     pub fn analyze(&mut self, samples: &[f32]) -> AudioFrame {
         debug_assert_eq!(samples.len(), self.window_size, "analyze: window size mismatch");
-        for i in 0..self.window_size {
-            self.input[i] = samples[i] * self.hann[i];
+        for (i, (sample, window)) in samples
+            .iter()
+            .zip(self.hann.iter())
+            .take(self.window_size)
+            .enumerate()
+        {
+            self.input[i] = sample * window;
         }
         // Process is infallible for matching sizes.
         let _ = self.fft.process(&mut self.input, &mut self.output);

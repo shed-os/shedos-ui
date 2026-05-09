@@ -16,7 +16,7 @@ use crossterm::event::{self, Event};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use shedos_screensaver_audio::{AudioCapture, Source as AudioSrc};
-use shedos_screensaver_core::{Clock, Color, Frame, Logo, RealClock, SignalListener};
+use shedos_screensaver_core::{Clock, Color, Frame, RealClock, SignalListener};
 use shedos_screensaver_effects::{target, Effect, EffectCtx, Registry as EffectsRegistry};
 use shedos_screensaver_i18n::{t, t_str, I18n};
 use shedos_screensaver_logos::{self as logos, LogoVariant};
@@ -1106,10 +1106,4 @@ mod tests {
         assert!(entered_hold, "rain never reached Holding state");
         assert!(restarted_after_hold, "engine never restarted after hold expired");
     }
-}
-
-// Force-keep Logo import used by the Engine via target::build_target.
-#[allow(dead_code)]
-fn _force_logo_use() -> Logo {
-    Logo::embedded()
 }

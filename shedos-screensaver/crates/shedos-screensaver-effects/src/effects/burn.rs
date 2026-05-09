@@ -74,7 +74,7 @@ impl Effect for Burn {
         // Render flame glyphs in a band around the front.
         for r in 0..self.rows {
             let dist = (r as f32) - front;
-            if dist >= 0.0 && dist <= 4.0 {
+            if (0.0..=4.0).contains(&dist) {
                 for c in 0..self.cols {
                     // Density ramps with column hash so the flame
                     // looks textured rather than a solid bar.

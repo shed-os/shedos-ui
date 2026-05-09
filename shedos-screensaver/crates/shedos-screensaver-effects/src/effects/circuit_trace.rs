@@ -81,7 +81,7 @@ impl Effect for CircuitTrace {
 
         // Greedy nearest-neighbor traversal starting at the
         // top-left-most lit cell.
-        remaining.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        remaining.sort_by_key(|a| (a.0, a.1));
         let mut ordered: Vec<(u16, u16, char, Color)> = Vec::with_capacity(remaining.len());
         ordered.push(remaining.remove(0));
         while !remaining.is_empty() {

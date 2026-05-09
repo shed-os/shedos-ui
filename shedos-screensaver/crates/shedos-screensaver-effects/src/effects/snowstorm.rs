@@ -15,7 +15,7 @@ const TRAVEL_NORM: f32 = 0.30;
 /// Horizontal sway amplitude in cells.
 const SWAY_AMP: f32 = 1.5;
 const SNOW_GLYPHS: &[char] = &['❅', '❆', '❈', '·', '*'];
-const SNOW_COLOR: Color = Color::rgb(0xd9, 0xe0_, 0xee);
+const SNOW_COLOR: Color = Color::rgb(0xd9, 0xe0, 0xee);
 
 #[derive(Clone, Copy)]
 struct Flake {

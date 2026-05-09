@@ -67,7 +67,7 @@ impl Effect for Tetris {
         let fall_dt = stagger_window / max_stack;
 
         for (col, mut cells) in by_col.into_iter() {
-            cells.sort_by(|a, b| b.0.cmp(&a.0)); // descending row
+            cells.sort_by_key(|a| std::cmp::Reverse(a.0)); // descending row
             for (idx, (row, ch, color)) in cells.into_iter().enumerate() {
                 let fall_start = (idx as f32 / max_stack) * stagger_window;
                 let fall_end = (fall_start + fall_dt).min(1.0);
