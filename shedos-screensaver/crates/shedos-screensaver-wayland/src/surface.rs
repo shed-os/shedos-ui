@@ -459,7 +459,6 @@ pub(crate) struct AppState {
     prompt_capslock: bool,
     error: Option<(Instant, String)>,
     fingerprint_rx: Option<Receiver<Result<(), String>>>,
-    #[allow(dead_code)]
     fingerprint_hint: Option<String>,
 }
 
@@ -768,6 +767,7 @@ impl AppState {
         let params = RenderParams {
             greeting: Some(greeting.as_str()),
             error_message: active_error.map(|(_, m)| m.as_str()),
+            fingerprint_hint: self.fingerprint_hint.as_deref(),
         };
         let rect = OutputRect {
             x: 0,

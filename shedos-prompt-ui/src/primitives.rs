@@ -78,6 +78,93 @@ pub fn rounded_rect_coverage(
     }
 }
 
+/// Anti-aliased arc segment. Stroke is centered on `radius`; pixels
+/// outside `[theta_start, theta_end]` (degrees, 0° = top / 12 o'clock,
+/// going clockwise) are skipped. `theta_start > theta_end` wraps
+/// through 0°/360° so a 270° arc opening at the bottom can be
+/// expressed as `(225, 135)`.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_arc(
+    canvas: &mut [u8],
+    cw: u32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    stroke: f32,
+    theta_start_deg: f32,
+    theta_end_deg: f32,
+    color: (u8, u8, u8),
+    alpha: u8,
+) {
+    let r_outer = radius + stroke / 2.0 + 1.0;
+    let xmin = (cx - r_outer).floor() as i32;
+    let xmax = (cx + r_outer).ceil() as i32;
+    let ymin = (cy - r_outer).floor() as i32;
+    let ymax = (cy + r_outer).ceil() as i32;
+    let edge = stroke / 2.0;
+    for y in ymin..=ymax {
+        for x in xmin..=xmax {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let off = (dist - radius).abs();
+            if off >= edge + 0.5 {
+                continue;
+            }
+            // Angle in "0° = top, clockwise" with canvas-y pointing
+            // down: north = (0,-1) → atan2(-1, 0) = -π/2 → -90°;
+            // adding 90° + wrap puts north at 0° and east at 90°,
+            // matching the convention above.
+            let angle = (dy.atan2(dx).to_degrees() + 90.0 + 360.0) % 360.0;
+            let in_range = if theta_start_deg <= theta_end_deg {
+                angle >= theta_start_deg && angle <= theta_end_deg
+            } else {
+                angle >= theta_start_deg || angle <= theta_end_deg
+            };
+            if !in_range {
+                continue;
+            }
+            let coverage = if off <= edge - 0.5 {
+                1.0
+            } else {
+                (edge + 0.5 - off).clamp(0.0, 1.0)
+            };
+            let a = (alpha as f32 * coverage) as u8;
+            if a > 0 {
+                blend_pixel(canvas, cw, x, y, color, a);
+            }
+        }
+    }
+}
+
+/// Concentric-arc fingerprint icon centered at (`cx`, `cy`). `size`
+/// is the diameter in pixels. Four arcs from outer to inner with a
+/// gap at the bottom — recognizable as a fingerprint at sizes ≥ 24px.
+pub fn draw_fingerprint_icon(
+    canvas: &mut [u8],
+    cw: u32,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    color: (u8, u8, u8),
+    alpha: u8,
+) {
+    let max_r = size / 2.0;
+    let stroke = (size * 0.08).max(1.5);
+    let arcs = [
+        (max_r * 0.95, 215.0_f32, 145.0_f32),
+        (max_r * 0.72, 225.0, 135.0),
+        (max_r * 0.50, 210.0, 150.0),
+        (max_r * 0.25, 0.0, 360.0),
+    ];
+    for (r, start, end) in arcs {
+        if r <= stroke / 2.0 {
+            continue;
+        }
+        draw_arc(canvas, cw, cx, cy, r, stroke, start, end, color, alpha);
+    }
+}
+
 /// Fill + stroke a rounded rectangle. Fill blends at `fill_alpha`;
 /// border blends at `border_alpha`. Both are anti-aliased on the
 /// curved edges.

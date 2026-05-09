@@ -90,6 +90,10 @@ pub struct RenderParams<'a> {
     /// Show this error message in red below the prompt instead of
     /// the greeting. None → no error.
     pub error_message: Option<&'a str>,
+    /// When `Some`, paints a fingerprint icon to the left of the
+    /// prompt input and shows the hint string under the prompt as
+    /// a secondary line. None → no fingerprint affordance.
+    pub fingerprint_hint: Option<&'a str>,
 }
 
 /// Paint a wallpaper-and-widgets composition for every output rect.
@@ -149,6 +153,7 @@ pub fn render(
             &cache.bold,
             params.error_message,
             params.greeting,
+            params.fingerprint_hint,
         );
     }
 }

@@ -3,7 +3,7 @@
 //! / error line + ShedOS branding label. All stateless; the caller
 //! supplies the prompt input state and pre-loaded font faces / theme.
 
-use crate::primitives::draw_rounded_box;
+use crate::primitives::{draw_fingerprint_icon, draw_rounded_box};
 use crate::text::FontFace;
 use crate::theme::Theme;
 use crate::{OutputRect, PromptState};
@@ -13,11 +13,15 @@ const DATE_PX: f32 = 24.0;
 const GREET_PX: f32 = 32.0;
 const BRAND_PX: f32 = 18.0;
 const INPUT_FONT_PX: f32 = 18.0;
+const FP_HINT_PX: f32 = 16.0;
 
 const INPUT_W: u32 = 300;
 const INPUT_H: u32 = 50;
 const INPUT_RADIUS: u32 = 10;
 const INPUT_BORDER: u32 = 2;
+
+const FP_ICON_SIZE: f32 = 40.0;
+const FP_ICON_GAP: i32 = 18;
 
 /// Convert 0xAARRGGBB → (R, G, B). Alpha is read separately by callers.
 fn rgb(c: u32) -> (u8, u8, u8) {
@@ -39,6 +43,7 @@ pub fn paint_widgets(
     bold: &FontFace,
     error_message: Option<&str>,
     greeting: Option<&str>,
+    fingerprint_hint: Option<&str>,
 ) {
     let (px, py, pw, ph) = (output_rect.x, output_rect.y, output_rect.w, output_rect.h);
     let text_color = rgb(theme.text);
@@ -84,6 +89,14 @@ pub fn paint_widgets(
         border, 0xee,
     );
 
+    if fingerprint_hint.is_some() {
+        let icon_cx = (box_x as f32) - (FP_ICON_GAP as f32) - (FP_ICON_SIZE / 2.0);
+        let icon_cy = (box_y + INPUT_H as i32 / 2) as f32;
+        draw_fingerprint_icon(
+            canvas, canvas_w, icon_cx, icon_cy, FP_ICON_SIZE, accent_color, 0xee,
+        );
+    }
+
     // Render password as bullet glyphs.
     if state.typed_chars > 0 {
         let dots: String = "●".repeat(state.typed_chars);
@@ -121,6 +134,19 @@ pub fn paint_widgets(
         let greet_x = px + (pw - greet_w) / 2;
         regular.render(
             greet, GREET_PX, greet_x, line_y, accent_color, 0xff,
+            canvas, canvas_w, canvas_h,
+        );
+    }
+
+    // Fingerprint hint sits one line below the greeting/error in
+    // muted text so it reads as secondary affordance, not the main
+    // call-to-action.
+    if let Some(hint) = fingerprint_hint {
+        let hint_y = line_y + GREET_PX as i32 + 8;
+        let hint_w = regular.measure_width(hint, FP_HINT_PX);
+        let hint_x = px + (pw - hint_w) / 2;
+        regular.render(
+            hint, FP_HINT_PX, hint_x, hint_y, text_color, 0x99,
             canvas, canvas_w, canvas_h,
         );
     }
