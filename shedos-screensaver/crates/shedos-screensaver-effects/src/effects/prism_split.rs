@@ -71,8 +71,8 @@ impl Effect for PrismSplit {
         frame.clear();
 
         // Offset shrinks linearly from MAX_OFFSET at t=0 to 0 at t=1.
-        // round() gives integer pixel offsets — once it hits 0, R/B
-        // ghosts are at the same position as center and get skipped.
+        // round() gives integer pixel offsets; once it hits 0, R/B
+        // ghosts coincide with center and get skipped.
         let offset = ((1.0 - progress) * MAX_OFFSET).round() as i32;
 
         // Pass 1: R/B ghosts at horizontal offsets. Drawn first so

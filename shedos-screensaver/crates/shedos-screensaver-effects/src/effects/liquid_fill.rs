@@ -90,7 +90,7 @@ impl Effect for LiquidFill {
                     attrs: Default::default(),
                 });
             }
-            // else above water — hidden
+            // else above water: hidden
         }
 
         progress >= 1.0
