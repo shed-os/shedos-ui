@@ -24,6 +24,7 @@ depends=(
     'pam'                   # libpam for --mode=lock authentication
     'fprintd'               # pam_fprintd.so for fingerprint unlock at the lock screen
 )
+conflicts=('hyprlock')
 makedepends=(
     'rust>=1.75'            # workspace builds against rust 2021 edition
     'cargo'
