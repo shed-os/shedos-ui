@@ -3,7 +3,7 @@ name = "shedos-greeter"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "ShedOS greetd greeter — hyprlock-styled login screen"
+description = "ShedOS greetd greeter — login screen"
 repository = "https://github.com/theshedman/shedos"
 publish = false
 

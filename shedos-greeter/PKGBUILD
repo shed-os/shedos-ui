@@ -1,14 +1,14 @@
 # Maintainer: ShedOS <https://github.com/theshedman/shedos>
 #
-# greetd greeter that mirrors hyprlock's visual identity. Renders the
-# wallpaper, clock, branding, and password input directly via
+# Custom greetd greeter. Renders the wallpaper, clock, branding,
+# and password input directly via
 # wlr-layer-shell + fontdue (no GTK), then authenticates against
 # greetd's IPC socket (PAM runs server-side as root).
 
 pkgname=shedos-greeter
 pkgver=2026.05.08
 pkgrel=3
-pkgdesc='ShedOS greetd greeter (hyprlock-styled login screen)'
+pkgdesc='ShedOS greetd greeter (login screen)'
 arch=('x86_64')
 url='https://github.com/theshedman/shedos'
 license=('GPL-3.0-or-later')
