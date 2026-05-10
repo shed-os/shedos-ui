@@ -1,11 +1,10 @@
 //! `shedos-screensaver` CLI binary.
 //!
 //! Architecture: an [`Engine`] cycles through (LogoVariant, Effect)
-//! pairs. Each cycle picks a logo + an effect (both random by
-//! default; `--logo=NAME` and/or `--effect=NAME` lock either axis),
-//! renders the logo to a target Frame, runs the effect to completion
-//! against that target, then holds the resolved art for `--hold`
-//! seconds before picking a new pair. The animation IS how the
+//! pairs. Each cycle picks a logo and effect (both random unless
+//! `--logo=NAME` or `--effect=NAME` is set), renders the logo to a
+//! target Frame, runs the effect to completion, then holds the
+//! resolved art for `--hold` seconds. The animation is how the
 //! SHEDOS art appears.
 
 mod auth;
@@ -145,15 +144,13 @@ struct Cli {
     cell_height_px: u32,
 
     /// Repeatable: one or more effect names to cycle through (random
-    /// order). Lets you curate a subset like
-    /// `--cycle rain --cycle decrypt --cycle matrix-rain`.
+    /// order). Curates a subset, e.g. `--cycle rain --cycle decrypt`.
     #[arg(long = "cycle", value_name = "NAME", action = ArgAction::Append)]
     cycle: Vec<String>,
 
-    /// Walk every (logo, effect) pair, run each to completion against
-    /// a fixed 80×24 canvas, and print the final ASCII frame to
-    /// stdout. Use it to review the catalog visually — pipe to a file
-    /// and scroll for combinations that don't render cleanly.
+    /// Walk every (logo, effect) pair, run each to completion on a
+    /// fixed 80×24 canvas, and print the final ASCII frame. Pipe to
+    /// a file to review the catalog visually.
     #[arg(long)]
     survey: bool,
 
@@ -283,7 +280,7 @@ fn main() -> ExitCode {
 
 fn resolve_mode(m: Mode) -> Mode {
     match m {
-        // `Auto` must never resolve to `Lock` — explicit only.
+        // `Auto` must never resolve to `Lock`; explicit only.
         Mode::Tty | Mode::Wayland | Mode::Lock => m,
         Mode::Auto => {
             if stdout_is_tty() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
@@ -311,7 +308,7 @@ struct Engine {
 }
 
 enum EngineState {
-    /// First frame — pick the initial pair.
+    /// First frame; pick the initial pair.
     Booting,
     /// Effect is currently animating toward `target`.
     Animating { effect: Box<dyn Effect>, target: Frame },
@@ -402,8 +399,8 @@ impl Engine {
                     frame.clear();
                     let done = effect.step(frame, dt, audio_frame.as_ref());
                     if done {
-                        // Snap canvas to exact target so the held image
-                        // looks pristine regardless of effect finish-state.
+                        // Snap canvas to target so the held image
+                        // looks clean regardless of where the effect ended.
                         frame.clone_from(target);
                         self.state = EngineState::Holding {
                             target: target.clone(),
@@ -418,13 +415,11 @@ impl Engine {
                         continue;
                     }
                     frame.clone_from(target);
-                    // `--hold 0` means "one-shot": animate to completion,
-                    // then sit on the resolved art forever (or until
-                    // SIGINT / SIGUSR1 / a keypress / `--duration`).
-                    // Without this, hold=0 restarts the animation every
-                    // frame so the completed art flashes for ~33 ms
-                    // (one frame) and disappears, which feels broken.
-                    // Cycling mode (--hold > 0) is unchanged.
+                    // `--hold 0` is one-shot: animate to completion,
+                    // then sit on the resolved art until SIGINT,
+                    // SIGUSR1, keypress, or `--duration`. Without
+                    // this, hold=0 would restart every frame and the
+                    // resolved art would flash for one frame.
                     if self.hold.is_zero() {
                         return;
                     }
@@ -541,12 +536,10 @@ fn run_wayland(
         idle_daemon: cli.idle_daemon,
     };
 
-    // The renderer mints one producer per output it discovers. The
-    // captures below are all clonable / copy-able except `audio`,
-    // which owns a cpal Stream we can't duplicate. The closure
-    // `take()`s the audio Option on its first call, so the first
-    // output to come up gets audio-reactive effects; subsequent
-    // outputs run their effects' silence-fallback path.
+    // One producer per output. Captures below are clonable except
+    // `audio`, which owns a non-duplicable cpal Stream. The closure
+    // `take()`s the Option on first call; the first output gets
+    // audio-reactive effects, later outputs use the silence fallback.
     let logo = cli.logo.clone();
     let effect = cli.effect.clone();
     let cycle = cli.cycle.clone();
@@ -594,11 +587,9 @@ fn run_lock(
 ) -> Result<(), String> {
     let lock_config = build_lock_config(cli)?;
 
-    // The lock-mode Screensaver phase renders on solid Color::BASE
-    // (no wallpaper) so the screensaver effects read clearly without
-    // a translucent wallpaper bleeding through. The Prompt-phase
-    // wallpaper comes from the theme via WidgetCache, independent
-    // of this `wallpaper_path`.
+    // Lock-mode Screensaver renders on solid Color::BASE so effects
+    // read clearly without a wallpaper bleed. The Prompt-phase
+    // wallpaper comes from the theme via WidgetCache.
     let cfg = WaylandConfig {
         font_path: cli.font_path.clone(),
         cell_height_px: cli.cell_height_px,
@@ -887,8 +878,8 @@ fn run_survey(registry: &EffectsRegistry) -> ExitCode {
     // dimensions; eyeball-comparable across the run.
     const ROWS: u16 = 24;
     const COLS: u16 = 80;
-    // Deterministic seed so re-running the survey produces the same
-    // frames — handy for diffing against an earlier capture.
+    // Deterministic seed so re-running produces the same frames,
+    // handy for diffing against an earlier capture.
     const SEED: u64 = 0x5348_4544_4F53_5343;
 
     let palette_pairs: usize = logos::LIBRARY.iter().map(|v| v.colors.len()).sum();
@@ -951,12 +942,10 @@ fn run_survey(registry: &EffectsRegistry) -> ExitCode {
 }
 
 fn print_frame_ascii(frame: &Frame) {
-    // Emit each non-blank cell as `\x1b[38;2;R;G;Bm<ch>` so that
-    // viewers which interpret ANSI (less -R, plain `cat` to a
-    // truecolor terminal) render the engine-assigned color.
-    // Blanks stay uncolored; we only re-emit the SGR when the
-    // foreground actually changes, which keeps the per-frame
-    // overhead near one escape per row.
+    // Emit each non-blank cell as `\x1b[38;2;R;G;Bm<ch>` so ANSI-
+    // aware viewers (less -R, truecolor cat) render the cell color.
+    // Blanks stay uncolored; SGR only re-emits when fg changes, so
+    // the per-frame overhead stays near one escape per row.
     for r in 0..frame.rows() {
         let mut last_fg: Option<Color> = None;
         for c in 0..frame.cols() {
@@ -1074,10 +1063,9 @@ mod tests {
 
     #[test]
     fn engine_hold_positive_does_cycle() {
-        // Sanity counterpart: with hold=0.5 s the engine MUST
-        // restart a new animation after the hold expires. Locks in
-        // that the hold=0 special case above doesn't accidentally
-        // freeze cycling mode.
+        // Counterpart to the hold=0 test: with hold=0.5s the engine
+        // restarts after the hold expires. Locks in that hold=0's
+        // special case doesn't break cycling mode.
         let mut engine = Engine::new(
             Some("block".to_string()),
             Some("rain".to_string()),

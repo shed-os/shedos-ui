@@ -1,8 +1,6 @@
-// PKGBUILD passes the package's CalVer (pkgver-pkgrel) via the
-// SHEDOS_VERSION env var at build time so `--version` matches what
-// pacman reports. Without packaging (a plain `cargo build` from the
-// workspace), fall back to the crate's SemVer from Cargo.toml so
-// dev runs still produce a sensible version string.
+// PKGBUILD passes pkgver-pkgrel via SHEDOS_VERSION so `--version`
+// matches what pacman reports. Plain `cargo build` falls back to
+// the crate's Cargo.toml SemVer for dev runs.
 
 fn main() {
     let version = std::env::var("SHEDOS_VERSION")
