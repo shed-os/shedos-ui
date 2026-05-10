@@ -1,8 +1,7 @@
-//! burn — fire rises from the bottom of the canvas, consuming
-//! blank space; in its wake the target cells appear, glowing first
-//! with ember colors, then settling to the final color. A reveal
-//! effect, not a consumption — the canvas starts blank and ends
-//! with the SHEDOS art lit.
+//! burn — fire rises from the bottom of the canvas. In its wake
+//! the target cells appear, glowing first with ember colors and
+//! settling to the final color. A reveal effect: the canvas starts
+//! blank and ends with the SHEDOS art lit.
 
 use crate::{AudioFrame, Cell, Color, Effect, EffectCtx, Frame};
 use std::time::Duration;
@@ -105,13 +104,11 @@ impl Effect for Burn {
             if (c.row as f32) <= front + 1.0 {
                 continue; // front hasn't reached this row yet
             }
-            // Reveal time was when front passed c.row; for cells just
-            // revealed, blend toward ember orange; deeper into the
-            // burn they fade to c.color. In the last 5 % force the
-            // settle to 1.0 so the resolved SHEDOS is solid target
-            // color across all rows (no leftover orange tint on the
-            // top rows that the ember-distance window never quite
-            // reached).
+            // Reveal time = when front passed c.row. Cells just revealed
+            // glow ember orange; deeper cells fade to c.color. The last
+            // 5% force settle=1.0 so the final SHEDOS is solid target
+            // color (no leftover orange tint on top rows the ember
+            // window didn't reach).
             let cells_since_reveal = c.row as f32 - front;
             let settle = if progress >= 0.95 {
                 1.0

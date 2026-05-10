@@ -1,8 +1,6 @@
-//! data-stream — each row of the canvas streams 1s and 0s
-//! horizontally. As the stream passes over a target cell, that cell
-//! "captures" the stream's bit and locks to its target glyph. Rows
-//! whose target cells have all locked stop streaming. Modern
-//! data-flow / matrix-adjacent feel.
+//! data-stream — each row streams 1s and 0s horizontally. As the
+//! stream passes a target cell, the cell locks to its target glyph.
+//! Rows with all target cells locked stop streaming.
 
 use crate::{AudioFrame, Cell, Color, Effect, EffectCtx, Frame};
 use std::time::Duration;
@@ -79,9 +77,8 @@ impl Effect for DataStream {
 
         frame.clear();
 
-        // For each row that still has unlocked cells, render the 1s
-        // and 0s stream. Skip rows where all target cells are
-        // locked (avoids visual noise once SHEDOS is mostly settled).
+        // Render 1s/0s only for rows with unlocked cells. Skipping
+        // fully-locked rows avoids visual noise late in the run.
         for r in 0..self.rows {
             let row_active = self
                 .cells

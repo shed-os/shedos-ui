@@ -116,8 +116,8 @@ impl Effect for CircuitTrace {
             let trace_window_start = (i as f32) * cell_spacing;
             let trace_window_end = ((i as f32) + 1.0) * cell_spacing;
             let path = manhattan_path(pr, pc, r, c);
-            // Path hides any cell that's also a lit endpoint — those
-            // are owned by the materialization timeline, not the trace.
+            // Path hides any cell that's also a lit endpoint; those
+            // are owned by the materialization timeline.
             for (pr_t, pc_t) in path {
                 if lit_set.contains(&(pr_t, pc_t)) {
                     continue;
@@ -195,8 +195,8 @@ fn manhattan_path(r0: u16, c0: u16, r1: u16, c1: u16) -> Vec<(u16, u16)> {
         }
         path.push((r as u16, c as u16));
     }
-    // Drop the final cell — it's the destination endpoint and renders
-    // through the materialize timeline, not as a trace cell.
+    // Drop the final cell; it's the destination endpoint, rendered
+    // through the materialize timeline.
     if !path.is_empty() {
         path.pop();
     }

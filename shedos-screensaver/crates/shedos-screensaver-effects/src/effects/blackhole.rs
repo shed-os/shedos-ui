@@ -11,7 +11,7 @@ use std::time::Duration;
 const DURATION_MS: u64 = 6_000;
 const PHASE_INWARD_END: f32 = 0.42;
 const PHASE_VANISHED_END: f32 = 0.50;
-/// Aspect correction — terminal cells are roughly twice as tall as
+/// Aspect correction: terminal cells are roughly twice as tall as
 /// wide, so radial geometry needs to compensate.
 const ASPECT: f32 = 0.5;
 
