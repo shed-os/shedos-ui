@@ -1,5 +1,5 @@
 //! expand — cells start at the canvas center and fly outward to
-//! their target positions. Reverse of "collapse".
+//! their target positions.
 
 use crate::easing;
 use crate::{AudioFrame, Cell, Color, Effect, EffectCtx, Frame};

@@ -96,7 +96,7 @@ impl Effect for Flashlight {
             let dy = c.row as f32 - light_y;
             let dist = (dx * dx + dy * dy).sqrt();
             let fg = if dist < CONE_R {
-                // Inside cone — bright white at center, blending to
+                // Inside cone: bright white at center, blending to
                 // target color at edges.
                 let edge_t = (dist / CONE_R).clamp(0.0, 1.0);
                 lerp_color(Color::rgb(0xff, 0xff, 0xff), c.color, edge_t)
