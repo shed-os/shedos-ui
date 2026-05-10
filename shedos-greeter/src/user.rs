@@ -1,16 +1,12 @@
 //! Resolve the username the greeter should authenticate.
 //!
-//! Order:
-//! 1. /etc/shedos/login-user if present and non-empty (Calamares writes
-//!    this for the chosen install user; customize_airootfs.sh writes
-//!    `shedos` for the live ISO).
-//! 2. Auto-detect: the single regular user in /etc/passwd (uid in
-//!    1000..65534, has a real shell). ShedOS is single-user by design.
+//! Precedence:
+//! 1. /etc/shedos/login-user (Calamares writes this for the install
+//!    user; the live ISO has `shedos`).
+//! 2. Single regular user in /etc/passwd (uid 1000..65534, real
+//!    shell). ShedOS is single-user by design.
 //!
-//! Returns None if neither hits — the greeter then renders an empty
-//! "Hi, " greeting and the auth dance still works as long as the user
-//! types into a future username field. (commit 4 does not yet expose
-//! one; the field lands when multi-user lands.)
+//! Returns None if neither hits.
 
 use std::fs;
 

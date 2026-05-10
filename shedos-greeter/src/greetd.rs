@@ -5,20 +5,15 @@
 //! 2. Loop on `Response`:
 //!    - `AuthMessage` (Secret | Visible) → caller supplies password →
 //!      `PostAuthMessageResponse { response: Some(...) }`.
-//!    - `AuthMessage` (Info | Error) → log it, ack with
-//!      `PostAuthMessageResponse { response: None }` and continue.
+//!    - `AuthMessage` (Info | Error) → log it, ack with `response: None`.
 //!    - `Success` → break.
-//!    - `Error` → return failure. greetd considers a session tarnished
-//!      after an Error and only honors `CancelSession` until reset; our
-//!      `Drop` impl sends `CancelSession` on every non-success path so
-//!      the next `CreateSession` on a fresh socket sees a clean slate.
-//!      Without that cleanup a single wrong-password attempt soft-bricks
-//!      the greeter — every subsequent attempt fails with "a session
-//!      is already being configured" until reboot.
-//! 3. `StartSession { cmd, env }` to launch the user session;
-//!    on `Success` we mark the auth as succeeded (suppressing the Drop
-//!    cancel, since greetd is now mid-handoff to the user session) and
-//!    exit.
+//!    - `Error` → return failure. greetd then only honors
+//!      `CancelSession` until reset; our `Drop` impl sends one on
+//!      every non-success path so a fresh `CreateSession` works.
+//!      Without it, a single wrong-password attempt locks the greeter
+//!      until reboot.
+//! 3. `StartSession { cmd, env }` to launch the user session. On
+//!    `Success` set `succeeded = true` so Drop skips the cancel.
 
 use std::os::unix::net::UnixStream;
 
@@ -27,19 +22,17 @@ use greetd_ipc::{codec::SyncCodec, AuthMessageType, ErrorType, Request, Response
 
 pub struct Auth {
     stream: UnixStream,
-    /// Set true after `StartSession` returns `Success`. The Drop impl
-    /// sends `CancelSession` iff this is false, so any error path —
-    /// named branches, `?` propagation from I/O errors, unexpected
-    /// responses — cleanly resets greetd's per-worker session state.
+    /// Set true after `StartSession` returns `Success`. Drop sends
+    /// `CancelSession` when false so any error path resets greetd's
+    /// per-worker session state.
     succeeded: bool,
 }
 
 impl Drop for Auth {
     fn drop(&mut self) {
         if !self.succeeded {
-            // Best-effort cancel; if the socket is already broken we
-            // can't do better than the original error report. Silent
-            // drop of any I/O failure here is intentional.
+            // Best-effort cancel; ignore I/O errors (the original
+            // error report is already on its way up).
             let _ = Request::CancelSession.write_to(&mut self.stream);
         }
     }
@@ -56,10 +49,8 @@ impl Auth {
         Ok(Self { stream, succeeded: false })
     }
 
-    /// Authenticate `username` with `password` and start `cmd`. Returns
-    /// `Ok(())` on session-start success; the caller should then exit so
-    /// greetd execs the user session. Any non-success path returns an
-    /// `Err` whose message can be logged for diagnostics.
+    /// Authenticate `username` with `password` and start `cmd`. On
+    /// success the caller should exit so greetd execs the user session.
     pub fn login(&mut self, username: &str, password: &str, cmd: Vec<String>) -> Result<()> {
         Request::CreateSession {
             username: username.to_string(),
@@ -74,10 +65,9 @@ impl Auth {
                     error_type,
                     description,
                 } => {
-                    // Keep the full PAM/greetd diagnostic in the
-                    // journal; surface a friendly message to the
-                    // user. AuthError → user typed wrong; Error →
-                    // systems-side failure (PAM misconfig, etc.).
+                    // Log the full PAM/greetd diagnostic; surface a
+                    // friendly message to the user. AuthError → user
+                    // mistyped; Error → server-side failure.
                     log::warn!(
                         "greetd auth ended in {:?}: {}",
                         error_type,

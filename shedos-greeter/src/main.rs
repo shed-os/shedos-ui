@@ -1,6 +1,5 @@
-// shedos-greeter — greetd greeter. The pixel-level rendering lives
-// in `shedos-prompt-ui`; this binary owns Wayland surface lifecycle,
-// keyboard handling, and the greetd IPC handshake.
+// shedos-greeter binary. Rendering goes through `shedos-prompt-ui`;
+// this binary owns the Wayland surface, keyboard, and greetd IPC.
 
 mod greetd;
 mod render;

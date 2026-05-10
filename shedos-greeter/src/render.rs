@@ -1,11 +1,10 @@
-//! Wayland xdg-shell fullscreen surface, password input handling,
-//! and theme-driven redraws. All pixel composition is delegated to
-//! `shedos-prompt-ui::render` so the greeter stays pixel-identical
-//! to the lock screen.
+//! Wayland xdg-shell fullscreen surface and keyboard handling.
+//! Pixel rendering goes through `shedos-prompt-ui::render` so the
+//! greeter stays pixel-identical to the lock screen.
 //!
-//! Multi-monitor: cage gives a single spanned surface across every
-//! output. We collect one `OutputRect` per `wl_output` and let
-//! `prompt_ui::render` mirror the full UI on each rect — no dimming.
+//! Multi-monitor: cage gives a single spanned surface; we collect
+//! one `OutputRect` per `wl_output` and let `prompt_ui::render`
+//! mirror the full UI on each rect.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -72,11 +71,10 @@ pub fn run() -> Result<()> {
         .context("xdg_wm_base not advertised by compositor")?;
     let shm = Shm::bind(&globals, &qh).context("wl_shm not advertised")?;
 
-    // xdg-shell instead of wlr-layer-shell because the kiosk hosting
-    // compositors we target (cage) advertise xdg_wm_base but not
-    // zwlr_layer_shell_v1. cage forces single-window-fullscreen at the
-    // toplevel level, so we get the same "fullscreen greeter" UX as
-    // layer-shell + Anchor::all without the protocol mismatch.
+    // xdg-shell because cage (the kiosk compositor) advertises
+    // xdg_wm_base but not zwlr_layer_shell_v1. cage forces fullscreen
+    // at the toplevel, so xdg-shell gives the same UX without the
+    // protocol mismatch.
     let surface = compositor.create_surface(&qh);
     let window = xdg_shell.create_window(surface, WindowDecorations::ServerDefault, &qh);
     window.set_title("ShedOS Greeter".to_string());
@@ -87,10 +85,9 @@ pub fn run() -> Result<()> {
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
     let username = user::resolve();
 
-    // Live-reload signal flipped by the inotify watcher when the theme
-    // reconciler swaps `current/` into place. Greeter checks this at
-    // the top of every draw() — picks up new palette + wallpaper on
-    // the next frame triggered by any event (keypress, configure, output).
+    // Inotify watcher flips this when the theme reconciler swaps
+    // `current/` into place. draw() checks it at the top to pick up
+    // the new palette + wallpaper.
     let theme_dirty = Arc::new(AtomicBool::new(false));
     let _watcher = {
         let flag = theme_dirty.clone();
@@ -155,9 +152,8 @@ struct App {
     password: String,
     capslock: bool,
     /// Error message rendered below the input box during the
-    /// `error_until` hold window. Populated by `submit()` with the
-    /// greetd error so PAM-side rejection reasons surface without
-    /// having to grep the journal.
+    /// `error_until` hold. Populated by `submit()` with the greetd
+    /// error so PAM rejection reasons surface inline.
     error_text: String,
     error_until: Option<Instant>,
     theme_dirty: Arc<AtomicBool>,
@@ -306,9 +302,8 @@ impl WindowHandler for App {
         configure: WindowConfigure,
         _serial: u32,
     ) {
-        // Compositors that want us to choose a size send None for both
-        // axes — fall back to 1080p so a misconfigured headless test
-        // still draws something.
+        // Compositors that want us to pick a size send None for both
+        // axes; fall back to 1080p for headless test environments.
         let w = configure.new_size.0.map(|n| n.get()).unwrap_or(1920);
         let h = configure.new_size.1.map(|n| n.get()).unwrap_or(1080);
         log::info!("configured at {}x{}", w, h);
