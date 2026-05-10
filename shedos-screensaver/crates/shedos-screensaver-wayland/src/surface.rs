@@ -48,6 +48,7 @@ use smithay_client_toolkit::{
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -310,6 +311,7 @@ impl WaylandRenderer {
                     .into(),
             ));
         }
+        touch_lock_sentinel();
 
         let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
         for o in outputs {
@@ -322,12 +324,36 @@ impl WaylandRenderer {
 
         let result = run_loop(&mut state, &mut event_loop);
 
+        if result.is_ok() {
+            clear_lock_sentinel();
+        }
+
         if let Some(lb) = state.lock_binding.as_mut() {
             lb.close();
         }
         let _ = conn.flush();
 
         result
+    }
+}
+
+// Sentinel checked by relock-on-restart after a compositor crash —
+// presence means "the session was locked when Hyprland died, so
+// re-engage the lock now that it's back."
+fn lock_sentinel_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(|d| PathBuf::from(d).join("shedos-locked"))
+}
+
+fn touch_lock_sentinel() {
+    if let Some(p) = lock_sentinel_path() {
+        let _ = fs::write(&p, b"");
+    }
+}
+
+fn clear_lock_sentinel() {
+    if let Some(p) = lock_sentinel_path() {
+        let _ = fs::remove_file(&p);
     }
 }
 
