@@ -1,10 +1,10 @@
 //! Fluent-rs wrapper for shedos-screensaver.
 //!
-//! - Catalogs live at `/usr/share/locale/<lang>/LC_MESSAGES/shedos-screensaver.ftl`
-//! - en-US is also embedded at compile time as a hard fallback.
-//! - Locale resolution: explicit `--locale` → `$LC_ALL` → `$LC_MESSAGES`
-//!   → `$LANG` → `en-US`.
-//! - Missing keys fall back to en-US, then to the bare key.
+//! Catalogs at `/usr/share/locale/<lang>/LC_MESSAGES/shedos-screensaver.ftl`,
+//! with en-US embedded at compile time as a hard fallback. Locale
+//! resolution: explicit `--locale` → `$LC_ALL` → `$LC_MESSAGES` →
+//! `$LANG` → `en-US`. Missing keys fall back to en-US, then to the
+//! bare key.
 
 pub use fluent::{FluentArgs, FluentValue};
 use fluent::FluentResource;
@@ -33,13 +33,10 @@ impl I18n {
     pub fn init(explicit: Option<&str>) -> Result<LanguageIdentifier, I18nError> {
         let lang = resolve_locale(explicit);
         let primary = build_bundle_for(&lang)?;
-        // The fallback is the compile-time embedded en-US catalog,
-        // never the on-disk one. This guarantees that a key newly
-        // added to the embedded copy resolves even when the
-        // installed /usr/share/locale/en/.../shedos-screensaver.ftl
-        // is older (e.g. between a binary upgrade and a package
-        // upgrade). Without this, a stale on-disk en-US would
-        // shadow new keys and force them to render as bare ids.
+        // Fallback uses the compile-time embedded en-US, not the
+        // on-disk one. New keys then resolve even if the installed
+        // shedos-screensaver.ftl is older (binary-then-package
+        // upgrade window).
         let fallback = build_embedded_bundle()?;
         let i18n = I18n { primary, fallback };
         let _ = BUNDLE.set(RwLock::new(i18n));
@@ -77,8 +74,7 @@ fn format_in(
     let mut errors = Vec::new();
     let s = bundle.format_pattern(pattern, args, &mut errors);
     if !errors.is_empty() {
-        // Format errors (missing args etc.) — return the partial result;
-        // missing keys are the explicit None branch above.
+        // Format errors (missing args etc.); partial result is returned.
     }
     Some(s.into_owned())
 }
@@ -155,8 +151,8 @@ pub fn t_args(key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
     I18n::t(key, Some(&a))
 }
 
-/// Convenience helper for the common case of all-string args —
-/// avoids forcing every call site to construct `FluentValue::from(...)`.
+/// Convenience helper for all-string args. Saves call sites from
+/// constructing `FluentValue::from(...)` repeatedly.
 pub fn t_str(key: &str, args: &[(&str, &str)]) -> String {
     let mut a = FluentArgs::new();
     for (k, v) in args {

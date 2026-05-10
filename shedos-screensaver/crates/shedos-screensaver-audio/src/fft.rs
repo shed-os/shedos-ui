@@ -1,7 +1,5 @@
 //! Windowed real-FFT analyzer + log-spaced band aggregation +
-//! beat-detection. Pure-CPU, no external state outside the
-//! `Analyzer` struct, so it's straightforward to unit-test against
-//! synthetic sine inputs.
+//! beat-detection. Pure-CPU, all state in the `Analyzer` struct.
 
 use realfft::num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
@@ -91,11 +89,10 @@ impl Analyzer {
 
         // Build NUM_BANDS log-spaced bins from cached edges.
         let mut bands = [0.0f32; NUM_BANDS];
-        // Sum-of-magnitudes per band (not average) so localized tones
-        // — which only light one bin — aren't washed out by being
-        // divided across the full band's bin count. Normalize by the
-        // window size's Hann coherent gain (≈ N/2) so a unit-amplitude
-        // sine peaks at ≈ 0.5.
+        // Sum-of-magnitudes per band (not average): localized tones
+        // light one bin and would otherwise be washed out by averaging
+        // across the band. Normalize by Hann coherent gain (≈ N/2)
+        // so a unit-amplitude sine peaks at ≈ 0.5.
         for (band_i, band_pair) in self.band_edges.windows(2).enumerate() {
             let lo_hz = band_pair[0];
             let hi_hz = band_pair[1];
@@ -116,11 +113,9 @@ impl Analyzer {
 
         let peak = bands.iter().copied().fold(0.0_f32, f32::max);
 
-        // Beat detection on the bass band. Only flag a beat once enough
-        // history has accumulated to compute a meaningful average; the
-        // cold-start period would otherwise spuriously flag every tick
-        // because (history_avg ≈ 0) makes any non-zero `bass_now` cross
-        // the BEAT_FACTOR multiplier.
+        // Beat detection on the bass band. Wait for enough history
+        // before firing: at cold start, history_avg ≈ 0 so any
+        // non-zero bass_now would cross BEAT_FACTOR.
         let bass_now = bands[BASS_BAND_INDEX];
         let beat = if self.history_count < self.bass_history.len() / 2 {
             // Warmup. Don't fire beats yet; just accumulate.
@@ -199,8 +194,8 @@ mod tests {
                 beats += 1;
             }
         }
-        // Warmup suppresses early beats; once warm, a steady signal
-        // never crosses 1.5×avg → no beats at all.
+        // Warmup suppresses early beats; a steady signal then never
+        // crosses 1.5×avg, so no beats fire.
         assert_eq!(beats, 0, "steady signal generated {beats} beats; expected 0");
     }
 

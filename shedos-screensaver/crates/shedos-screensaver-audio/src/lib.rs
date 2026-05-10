@@ -1,17 +1,14 @@
 //! cpal-backed audio source for shedos-screensaver.
 //!
-//! Captures from an audio device chosen via [`Source`]:
-//! - `Source::Mic` opens the system default input device.
-//! - `Source::Desktop` enumerates input devices and picks the first
-//!   one whose name contains `monitor` (the conventional pulse/pipewire
-//!   loopback naming, e.g. `alsa_output.pci-0000_00_1f.3.analog-stereo.monitor`).
-//!   Falls back to the default input if no monitor source is found.
+//! `Source::Mic` opens the system default input device. `Source::Desktop`
+//! picks the first input device whose name contains `monitor`
+//! (pulse/pipewire loopback convention), falling back to the default
+//! input if none is found.
 //!
-//! Samples are mixed down to mono f32, ring-buffered, and analyzed by
-//! a windowed FFT (32 log-spaced bands + peak + beat). The capture
-//! thread runs in the background; if cpal fails to open a stream we
-//! surface a single warning and return [`AudioFrame::silent`] from
-//! [`AudioCapture::latest`].
+//! Samples are mixed to mono f32, ring-buffered, and analyzed by a
+//! windowed FFT (32 log-spaced bands + peak + beat). On stream-open
+//! failure, a warning is logged and [`AudioCapture::latest`] returns
+//! [`AudioFrame::silent`].
 
 pub mod fft;
 
@@ -43,15 +40,14 @@ pub enum Source {
 pub struct AudioCapture {
     latest: Arc<Mutex<AudioFrame>>,
     available: Arc<AtomicBool>,
-    /// We must keep the cpal Stream alive on this struct (Stream is
-    /// !Send + !Sync but Drop'd here is fine; the stream itself runs
-    /// the audio thread).
+    /// Keep the cpal Stream alive (it's !Send + !Sync but Drop here
+    /// is fine; the stream owns the audio thread).
     _stream: Option<Stream>,
 }
 
-// Stream is !Send because of cpal's host-handle internals; we don't
-// move it across threads — it just sits in the same struct that owns
-// the audio source. The Mutex<AudioFrame> is the cross-thread channel.
+// Stream is !Send (cpal host internals) but never moves across
+// threads; it stays in the struct. The Mutex<AudioFrame> is the
+// cross-thread channel.
 unsafe impl Send for AudioCapture {}
 unsafe impl Sync for AudioCapture {}
 

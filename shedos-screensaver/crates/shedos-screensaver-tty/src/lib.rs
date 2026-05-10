@@ -1,14 +1,9 @@
 //! Terminal renderer for shedos-screensaver.
 //!
-//! Two pieces, decoupled so headless tests can drive the renderer
-//! without touching the global terminal state:
-//!
-//! - [`TerminalGuard`] — RAII guard that flips the real stdout into
-//!   raw + alt-screen + cursor-hidden on enter and restores everything
-//!   on Drop. Live mode constructs one before instantiating a renderer.
-//! - [`TtyRenderer<W>`] — generic over any [`std::io::Write`]. Diff-emits
-//!   only the cells that changed since the previous frame. Tests pass
-//!   a `Vec<u8>` and snapshot the resulting ANSI bytes.
+//! [`TerminalGuard`]: RAII guard for raw mode + alt-screen +
+//! cursor-hidden, restored on Drop. [`TtyRenderer<W>`]: generic over
+//! any [`std::io::Write`]; diff-emits only changed cells. Tests pass
+//! a `Vec<u8>` and snapshot the resulting ANSI bytes.
 
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -19,9 +14,8 @@ use crossterm::{
 use shedos_screensaver_core::{CellAttrs, Color, Frame};
 use std::io::{self, IsTerminal, Write};
 
-/// RAII handle for live-terminal state. Constructing flips raw mode +
-/// alt-screen + hide-cursor on; dropping restores. Drop runs even on
-/// panic, so the user's terminal is always cleaned up.
+/// RAII handle for live-terminal state. Construct flips raw + alt-
+/// screen + hide-cursor; drop restores. Runs on panic too.
 pub struct TerminalGuard {
     raw_was_enabled: bool,
 }

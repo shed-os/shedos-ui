@@ -1,26 +1,19 @@
 //! Library of SHEDOS ASCII art variants.
 //!
 //! Each variant is a pre-rendered SHEDOS in a different "font" style,
-//! bundled into the binary via `include_str!` so the screensaver
-//! has zero runtime file dependencies. The Logo loader from -core
-//! parses each variant's text into a `Logo { mask, glyphs, … }` ready
-//! for an effect to animate toward.
+//! `include_str!`'d at compile time so the screensaver has no runtime
+//! file dependencies. -core's Logo loader parses each variant into a
+//! `Logo { mask, glyphs, … }`.
 //!
-//! Each variant ships with a small curated palette of Catppuccin
-//! Mocha colors. The cycle engine picks one at random per session,
-//! turning every `(logo, effect)` pair into several visually distinct
-//! frames. The first palette entry is treated as the canonical brand
-//! color and is used by deterministic call sites (the survey tool,
-//! fixtures, any future snapshot tests).
+//! Each variant ships with a curated Catppuccin Mocha palette. The
+//! cycle engine picks one at random per session; the first entry is
+//! the canonical brand color used by deterministic call sites.
 //!
-//! Adding a variant is a 3-step PR:
-//!   1. Drop a `.txt` under art/<name>.txt with the new SHEDOS rendition.
-//!   2. Add a `LogoVariant` entry to [`LIBRARY`] below with its palette.
-//!   3. (Optional) Add a snapshot test that loads it and asserts row/col.
+//! Adding a variant: drop `art/<name>.txt`, add a `LogoVariant` entry
+//! to [`LIBRARY`] with its palette, optionally add a snapshot test.
 //!
-//! `/etc/shedos-ascii.txt` still wins as a per-system override at
-//! runtime — handled by the CLI, not here. This library is the
-//! built-in catalog.
+//! `/etc/shedos-ascii.txt` overrides at runtime via the CLI; this
+//! library is the built-in catalog.
 
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -57,17 +50,14 @@ impl LogoVariant {
         Logo::parse(self.art, PathBuf::from(format!("<embedded:{}>", self.name)))
     }
 
-    /// Canonical brand color — the first palette entry. Used by
-    /// deterministic call sites where a single representative color
-    /// is needed (survey tool, fixtures).
+    /// Canonical brand color: the first palette entry. Used by
+    /// deterministic call sites (survey tool, fixtures).
     pub fn default_color(&self) -> Color {
         self.colors[0].color
     }
 
     /// Pick a color uniformly from the palette. The cycle engine
-    /// calls this each session when no `--color` override is set,
-    /// so the same logo appears in different palette members across
-    /// cycles.
+    /// calls this per session when no `--color` override is set.
     pub fn pick_color(&self, rng: &mut impl Rng) -> Color {
         self.colors
             .choose(rng)
@@ -293,9 +283,8 @@ pub fn pick_random(rng: &mut impl Rng) -> &'static LogoVariant {
 }
 
 /// Pick a random variant whose footprint fits in the given canvas.
-/// If nothing fits (extremely small canvas), falls back to the
-/// narrowest variant in the library — the catalog can shrink over
-/// time, so we don't hardcode a specific name.
+/// If nothing fits, falls back to the narrowest variant; doesn't
+/// hardcode a name so the catalog can shrink.
 pub fn pick_random_for_canvas(rng: &mut impl Rng, rows: u16, cols: u16) -> &'static LogoVariant {
     let candidates: Vec<&'static LogoVariant> = LIBRARY
         .iter()
@@ -421,8 +410,8 @@ mod tests {
     #[test]
     fn pick_random_for_tiny_canvas_falls_back_to_smallest() {
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        // 5 rows × 20 cols — none of the current logos fit; fallback
-        // path returns whichever LIBRARY entry has the fewest cols.
+        // 5 rows × 20 cols: none of the current logos fit; fallback
+        // returns whichever LIBRARY entry has the fewest cols.
         let v = pick_random_for_canvas(&mut rng, 5, 20);
         let smallest_cols = LIBRARY
             .iter()
