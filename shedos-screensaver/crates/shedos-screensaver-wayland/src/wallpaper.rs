@@ -1,8 +1,7 @@
 //! Wallpaper backdrop loader + dim/scale helper.
 //!
-//! Loaded once at renderer construction; on each frame the prepared
-//! framebuffer is memcpy'd as the starting layer before cells are
-//! composited on top.
+//! Loaded once; per-frame the prepared framebuffer is memcpy'd as
+//! the starting layer before cells are composited on top.
 
 use crate::pack_argb;
 use image::{imageops::FilterType, GenericImageView};

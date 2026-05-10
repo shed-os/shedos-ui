@@ -1,19 +1,13 @@
 //! Wayland-native fullscreen overlay renderer for shedos-screensaver.
 //!
-//! The renderer attaches an `wlr-layer-shell-unstable-v1` surface at
-//! `Layer::Overlay` with `keyboard_interactivity = Exclusive` and
-//! `exclusive_zone = -1`, so it covers every other surface and grabs
-//! all input. Buffers are CPU-rasterized into a `wl_shm` pool: each
-//! frame, the cell grid is rendered through a fontdue-baked DejaVu
-//! Sans Mono atlas onto an optional dimmed wallpaper backdrop, then
-//! the resulting RGBA framebuffer is committed to the surface.
+//! Attaches a `wlr-layer-shell-unstable-v1` surface at `Layer::Overlay`
+//! with `keyboard_interactivity = Exclusive` and `exclusive_zone = -1`
+//! so it covers every other surface and grabs all input. Buffers are
+//! CPU-rasterized into a `wl_shm` pool.
 //!
-//! Why CPU instead of wgpu: the visual budget is text-cell granularity
-//! at terminal-typical density (≤ a few thousand cells), which the
-//! CPU handles comfortably at 60 fps for any reasonable display. Skip-
-//! ping wgpu cuts ~7 MB of binary size, drops the vulkan-icd-loader
-//! runtime dep, and removes the entire class of "GPU not available
-//! on this iGPU" failures. If perf becomes an issue we can revisit.
+//! CPU instead of wgpu: text-cell density (≤ a few thousand cells)
+//! runs comfortably at 60 fps. Skipping wgpu also cuts ~7 MB of
+//! binary size and the vulkan-icd-loader runtime dep.
 
 mod dpms;
 mod font;
@@ -27,10 +21,9 @@ pub use shedos_screensaver_core::LockStateConfig;
 pub use surface::{ProducerFactory, WaylandRenderer};
 pub use wallpaper::Wallpaper;
 
-/// Re-exports of calloop's ping primitives so the cli crate can construct
-/// a Ping/PingSource pair without depending on calloop directly. The
-/// fingerprint auth thread lives in cli and pings the lock binary's
-/// event loop on every attempt completion.
+/// Re-exports of calloop's ping primitives so the cli crate can build
+/// a Ping/PingSource pair without depending on calloop. The fingerprint
+/// auth thread pings the lock loop on each attempt completion.
 pub mod calloop_ping {
     pub use smithay_client_toolkit::reexports::calloop::ping::{make_ping, Ping, PingSource};
 }
@@ -54,13 +47,10 @@ pub struct LockConfig {
 }
 
 pub struct FingerprintConfig {
-    /// Channel of fingerprint-thread attempt outcomes. `Ok(())` means
-    /// the PAM stack accepted the scan and the lock should release;
-    /// `Err(())` means the attempt failed for any reason and the lock
-    /// loop should drop it silently (the thread already logged the
-    /// raw PAM code via stderr). Carrying no string keeps the
-    /// fingerprint failure path from accidentally feeding the
-    /// password prompt's error slot.
+    /// Channel of fingerprint attempt outcomes. `Ok(())` releases the
+    /// lock; `Err(())` is dropped silently (the thread already logged
+    /// via stderr). No string keeps fingerprint failures from leaking
+    /// into the password prompt's error slot.
     pub rx: Receiver<Result<(), ()>>,
     pub ping_source: calloop_ping::PingSource,
     pub hint_text: String,
@@ -91,16 +81,15 @@ impl Default for WaylandConfig {
             wallpaper_path: None,
             wallpaper_dim: 0.5,
             fps_cap: 60,
-        idle_daemon: false,
+            idle_daemon: false,
         }
     }
 }
 
-/// What the renderer can ask of the caller every frame.
+/// What the renderer asks of the caller per frame.
 pub trait FrameProducer {
-    /// Render the next animation frame into `frame`. The renderer hands
-    /// over the canvas dimensions through `frame.rows()` / `frame.cols()`;
-    /// the producer must respect them.
+    /// Render the next animation frame into `frame`. Use the canvas
+    /// dimensions from `frame.rows()` / `frame.cols()`.
     fn produce(&mut self, frame: &mut Frame);
 }
 

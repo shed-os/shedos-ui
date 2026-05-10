@@ -1,16 +1,14 @@
-//! Bake a TrueType font into a glyph atlas.
+//! TrueType font baked into a glyph-bitmap cache.
 //!
-//! For each codepoint that the styles render, fontdue produces a
-//! grayscale (8-bit alpha) bitmap. The atlas caches these bitmaps so
-//! repeated glyph emits in the frame loop are constant-time lookups.
+//! Fontdue emits a grayscale alpha bitmap per codepoint; cached so
+//! repeated glyph emits are O(1).
 
 use fontdue::{Font, FontSettings};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// System DejaVu Sans Mono installation paths in priority order.
-/// First one that exists wins; we only fall through to a hard fallback
-/// (a tiny embedded 8×16 ASCII bitmap) if every candidate is missing.
+/// System DejaVu Sans Mono paths in priority order. First match wins;
+/// loading errors with `NoDefaultAvailable` if all are missing.
 const DEJAVU_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
     "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
@@ -147,9 +145,8 @@ mod tests {
             assert!(w > 0 && h > 0, "cell dims must be positive; got {}x{}", w, h);
             assert!(a.baseline() > 0, "baseline must be positive");
         }
-        // If DejaVu isn't installed (e.g. CI without ttf-dejavu),
-        // skip silently — the binary's own fallback to hard error
-        // will be exercised at runtime.
+        // DejaVu may not be installed in CI; the runtime fallback to
+        // hard error is exercised separately.
     }
 
     #[test]
