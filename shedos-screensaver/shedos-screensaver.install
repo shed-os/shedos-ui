@@ -1,0 +1,20 @@
+# shedos-screensaver install scriptlet
+
+post_upgrade() {
+    # Gate by previous pkgver: pacman removes hyprlock via conflicts=
+    # before this hook runs, so a runtime `pacman -Qq` check is too late.
+    local prev_pkgver="${2%%-*}"
+    [[ -n "$prev_pkgver" ]] || return 0
+    [[ "$(vercmp "$prev_pkgver" 2026.05.08)" -lt 0 ]] || return 0
+
+    cat <<'EOF'
+
+hyprlock has been removed. shedos-screensaver is the lock client now;
+run `shedman lock`, or let hypridle fire it on idle.
+
+A customised ~/.config/hypr/hyprlock.conf is archived to
+hyprlock.conf.shedos-bak on your next login. See man shedman-screensaver
+for porting any custom labels.
+
+EOF
+}

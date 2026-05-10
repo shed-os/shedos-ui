@@ -13,6 +13,7 @@ pkgdesc='Animated screensaver: TTY + Wayland backends, 8 styles, audio-reactive'
 arch=('x86_64')
 url='https://github.com/theshedman/shedos'
 license=('GPL-3.0-or-later')
+install=shedos-screensaver.install
 depends=(
     'gcc-libs'              # rust runtime
     'glibc'
