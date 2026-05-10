@@ -1,7 +1,5 @@
-//! Composed widgets that render onto an Argb8888 canvas relative to
-//! a per-output rect: big clock + date + password input + greeting
-//! / error line + ShedOS branding label. All stateless; the caller
-//! supplies the prompt input state and pre-loaded font faces / theme.
+//! Composed widgets onto an Argb8888 canvas: clock, date, prompt
+//! input, greeting/error line, ShedOS branding. Stateless.
 
 use crate::primitives::{draw_fingerprint_icon, draw_rounded_box};
 use crate::FingerprintRender;
@@ -29,9 +27,8 @@ fn rgb(c: u32) -> (u8, u8, u8) {
     (((c >> 16) & 0xff) as u8, ((c >> 8) & 0xff) as u8, (c & 0xff) as u8)
 }
 
-/// Paint clock + date + prompt input + greeting/error + branding,
-/// centered on the given `output_rect`. The wallpaper is assumed to
-/// already cover the full canvas.
+/// Paint widgets centered on `output_rect`. The wallpaper is assumed
+/// to already cover the full canvas.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_widgets(
     canvas: &mut [u8],
@@ -140,9 +137,7 @@ pub fn paint_widgets(
         );
     }
 
-    // Fingerprint hint sits one line below the greeting/error in
-    // muted text so it reads as secondary affordance, not the main
-    // call-to-action.
+    // Fingerprint hint sits below the greeting/error in muted text.
     if let Some(fp) = fingerprint {
         let hint_y = line_y + GREET_PX as i32 + 8;
         let hint_w = regular.measure_width(fp.hint, FP_HINT_PX);

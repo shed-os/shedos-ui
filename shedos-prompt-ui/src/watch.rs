@@ -2,14 +2,10 @@
 //! parent of `/etc/shedos/themes/current/` and fires a callback once
 //! per atomic swap performed by the reconciler.
 //!
-//! Why the parent directory? `current/` is replaced via
-//! `os.rename(current.tmp, current)` — the OLD inode is gone after
-//! the swap, so any inotify watch held on the old `current/` itself
-//! is torn down. Watching the parent for `IN_MOVED_TO` events whose
-//! name is `current` produces one stable event per swap regardless
-//! of inode churn. The reconciler's `.applied-at` sentinel lives
-//! inside the new directory and is the consumer's confirmation
-//! signal that the swap is complete.
+//! Watching the parent rather than `current/` itself: the reconciler
+//! replaces `current/` via `os.rename`, so an inotify watch on the
+//! old inode is torn down with it. `IN_MOVED_TO` on the parent
+//! survives that.
 
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
@@ -17,16 +13,14 @@ use std::thread::{self, JoinHandle};
 use anyhow::{Context, Result};
 use inotify::{Inotify, WatchMask};
 
-/// Spawn a watcher thread on `parent_dir`. Every time `current` (or
-/// any sibling directory matching `target_name`) is moved into place
-/// by an atomic rename, `callback` fires.
+/// Spawn a watcher thread on `parent_dir`. Every time a sibling
+/// directory matching `target_name` is moved into place by an
+/// atomic rename, `callback` fires.
 ///
-/// The returned `JoinHandle` is detachable — drop it to let the
-/// thread run for the rest of the process lifetime. Errors during
-/// initialization (cannot open inotify, cannot add watch) bubble up
-/// synchronously; errors after that are logged and the thread
-/// continues so a transient hiccup doesn't permanently disable
-/// theme reloads.
+/// The returned `JoinHandle` is detachable; drop it to let the thread
+/// run for the rest of the process lifetime. Init errors (open
+/// inotify, add watch) bubble up synchronously; later errors are
+/// logged and the thread keeps running.
 pub fn watch<F>(
     parent_dir: &Path,
     target_name: &str,
@@ -94,13 +88,9 @@ mod tests {
 
     #[test]
     fn watcher_spawns_without_error_on_existing_dir() {
-        // /tmp definitely exists on any sane test runner.
         let h = watch(Path::new("/tmp"), "no-such-target-xxxxxxxxx", || {})
             .expect("spawn watcher");
-        // The thread is running in the background; we can let it leak
-        // for the rest of the test binary's lifetime — that's the
-        // typical use pattern for a long-running watcher.
-        std::mem::forget(h);
+        std::mem::forget(h); // intentionally leaked for the test's lifetime
     }
 
     #[test]

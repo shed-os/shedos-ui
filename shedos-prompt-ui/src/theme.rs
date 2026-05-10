@@ -1,16 +1,15 @@
-//! Theme: concrete palette + wallpaper paths + fonts loaded from
-//! `/etc/shedos/themes/current/greeter.toml` (the theme reconciler's
-//! output) with a robust per-field fallback to bundled defaults so
-//! the surface always paints *something*, even when the theme dir
+//! Concrete palette, wallpaper paths, and fonts loaded from
+//! `/etc/shedos/themes/current/greeter.toml`. Per-field fallback to
+//! bundled defaults keeps the surface paintable when the theme dir
 //! is missing or partially corrupt.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// We only consume schema version 1 today; bumps would land in the
-/// reconciler first and we'd refuse newer schemas to avoid
-/// misinterpreting fields.
+/// Only schema version 1 is consumed today. Newer schemas land in
+/// the reconciler first and are refused here to avoid misinterpreting
+/// fields.
 const ACCEPTED_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug, Clone)]
@@ -52,8 +51,7 @@ struct GreeterColors {
 impl Theme {
     pub const CURRENT_DIR: &'static str = "/etc/shedos/themes/current";
 
-    /// Bundled-into-the-binary defaults. The safety net per the spec:
-    /// surfaces always paint *something*, even when the theme dir is
+    /// Bundled defaults so surfaces paint when the theme dir is
     /// missing entirely.
     pub fn fallback() -> Self {
         Self {

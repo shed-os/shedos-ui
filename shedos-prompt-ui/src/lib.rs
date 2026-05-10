@@ -1,14 +1,10 @@
-//! Shared rendering for ShedOS lock surfaces — the greeter
-//! (`shedos-greeter`) and the screensaver-as-lock-client
-//! (`shedos-screensaver --mode=lock`) both draw the same widgets
-//! through this crate so the two surfaces stay pixel-identical
-//! and react to `shedman theme set` the same way.
+//! Shared widget rendering for the greeter and the screensaver lock
+//! client. Both draw the same widgets through this crate so they stay
+//! pixel-identical and react to `shedman theme set` the same way.
 //!
-//! The crate is stateless apart from a `WidgetCache` (font + scaled
-//! wallpaper). Callers own their wl_shm buffer, theme, and prompt
-//! state; this crate composites widgets onto the byte buffer and
-//! returns. Surface lifecycle (commit, frame callbacks, damage)
-//! stays with the caller.
+//! Stateless except for `WidgetCache` (font + scaled wallpaper).
+//! Callers own their wl_shm buffer; this crate paints widgets onto
+//! it and returns.
 
 #![forbid(unsafe_code)]
 
@@ -26,9 +22,8 @@ pub use theme::Theme;
 use text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
 use wallpaper::Wallpaper;
 
-/// Caller-owned prompt input state. Never holds the typed password —
-/// only the count of characters typed (so the renderer can paint
-/// dots) plus a few flags.
+/// Prompt input state. Holds the count of typed characters (for dot
+/// rendering) and a few flags. Never the typed password itself.
 #[derive(Debug, Clone, Default)]
 pub struct PromptState {
     pub typed_chars: usize,
@@ -47,10 +42,8 @@ pub struct OutputRect {
     pub h: i32,
 }
 
-/// Heavy state that's expensive to rebuild on every redraw: font
-/// faces (loaded once) and the per-surface wallpaper cache. Caller
-/// constructs this once, reuses it across frames, drops it on
-/// surface teardown.
+/// Heavy state expensive to rebuild per frame: font faces and the
+/// per-surface wallpaper cache. Build once, reuse across frames.
 pub struct WidgetCache {
     pub regular: FontFace,
     pub bold: FontFace,
@@ -58,11 +51,9 @@ pub struct WidgetCache {
 }
 
 impl WidgetCache {
-    /// Load fonts + decode the (blurred) wallpaper from the theme.
-    /// Use the blurred wallpaper for lock surfaces — it's softened
-    /// so the prompt UI reads cleanly. Desktop wallpaper daemons
-    /// (awww) read the sharp `theme.wallpaper` directly, not via
-    /// this cache.
+    /// Load fonts and decode the blurred wallpaper. The blurred
+    /// variant softens the background so the prompt reads cleanly;
+    /// desktop wallpaper daemons read `theme.wallpaper` directly.
     pub fn new(theme: &Theme) -> Result<Self> {
         let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
         let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
@@ -80,44 +71,33 @@ impl WidgetCache {
     }
 }
 
-/// Per-frame render parameters that consumers tweak between calls.
-/// Kept as a struct so adding fields (e.g. accessibility hints,
-/// override greeting) doesn't churn the call sites.
+/// Per-frame render parameters. Struct-shaped so adding fields
+/// doesn't churn call sites.
 #[derive(Debug, Clone, Default)]
 pub struct RenderParams<'a> {
-    /// Override the "Hi, $user" greeting. None → no greeting line.
+    /// Override the greeting. None → no greeting line.
     pub greeting: Option<&'a str>,
-    /// Show this error message in red below the prompt instead of
-    /// the greeting. None → no error.
+    /// Error message in red, taking the greeting's slot. None → no error.
     pub error_message: Option<&'a str>,
-    /// When `Some`, paints a fingerprint icon to the left of the
-    /// prompt input and shows the hint string under the prompt as
-    /// a secondary line. None → no fingerprint affordance.
+    /// Fingerprint icon and hint. None → no fingerprint affordance.
     pub fingerprint: Option<FingerprintRender<'a>>,
 }
 
-/// Visual state of the fingerprint affordance for a single frame.
-/// Caller computes color + hint text from auth-thread state so the
-/// renderer stays purely presentational. `icon_color_argb` is the
-/// 0xAARRGGBB value the icon strokes are painted in; the hint string
-/// is the secondary line below the greeting.
+/// Per-frame fingerprint affordance state. Caller picks the color
+/// and hint from auth-thread state so the renderer stays presentational.
 #[derive(Debug, Clone, Copy)]
 pub struct FingerprintRender<'a> {
     pub hint: &'a str,
     pub icon_color_argb: u32,
 }
 
-/// Paint a wallpaper-and-widgets composition for every output rect.
-/// Each output gets its own self-contained, correctly-aspected
-/// wallpaper (no stretch across cage's spanned canvas) and a full
-/// mirrored widget set. `outputs` should hold one rect per
-/// `wl_output` (single-monitor → a single rect equal to the canvas;
-/// multi-monitor → one rect per physical output, all rendered
-/// identically per the no-dimming spec).
+/// Paint wallpaper and widgets for every output rect. Each output
+/// gets a correctly-aspected wallpaper (no stretching across cage's
+/// spanned canvas) and a mirrored widget set. With `outputs` empty,
+/// renders once at the full canvas.
 ///
-/// Caller's wl_shm buffer is wl_shm::Format::Argb8888 (BGRA byte
-/// order on little-endian); `canvas` length must be at least
-/// `canvas_w * canvas_h * 4`.
+/// `canvas` is wl_shm Argb8888 (BGRA on little-endian); length must
+/// be at least `canvas_w * canvas_h * 4`.
 pub fn render(
     canvas: &mut [u8],
     canvas_w: u32,
@@ -146,9 +126,8 @@ pub fn render(
     } else {
         outputs
     };
-    // Wallpapers first, all rects, then widgets — keeps widget
-    // overlays from being clobbered if rects ever share boundary
-    // pixels.
+    // Wallpapers first, then widgets, so overlays aren't clobbered
+    // if rects share boundary pixels.
     for rect in rects {
         cache.wallpaper.blit_rect(canvas, canvas_w, canvas_h, rect);
     }

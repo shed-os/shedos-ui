@@ -1,5 +1,4 @@
-//! Text rendering: load JetBrainsMono Nerd Font (Regular + Bold)
-//! via fontdue and composite glyph bitmaps onto an ARGB8888 canvas
+//! Text rendering: fontdue glyph composition onto wl_shm Argb8888
 //! (BGRA byte order on little-endian) with alpha blending.
 
 use anyhow::{anyhow, Context, Result};
@@ -51,10 +50,9 @@ impl FontFace {
         w.ceil() as i32
     }
 
-    /// Composite `text` onto `canvas` at baseline (`x`, `y`).
-    /// `color` is sRGB (R, G, B); `alpha` is overall opacity (0..=255)
-    /// applied on top of fontdue's per-glyph anti-aliasing alpha.
-    /// Canvas is wl_shm Argb8888 (BGRA byte order on little-endian).
+    /// Composite `text` onto `canvas` at baseline (`x`, `y`). `color`
+    /// is sRGB (R, G, B); `alpha` (0..=255) combines with fontdue's
+    /// per-glyph alpha. Canvas is wl_shm Argb8888 (BGRA on LE).
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,

@@ -1,5 +1,4 @@
-//! Pixel-level drawing primitives shared between widgets:
-//! anti-aliased rounded rectangle and an alpha-blend pixel writer.
+//! Pixel-level drawing primitives shared between widgets.
 
 /// Alpha-blend a single (R, G, B) pixel into a wl_shm Argb8888
 /// canvas (BGRA byte order on little-endian) at logical (x, y).
@@ -113,8 +112,7 @@ pub fn draw_arc(
             }
             // Angle in "0° = top, clockwise" with canvas-y pointing
             // down: north = (0,-1) → atan2(-1, 0) = -π/2 → -90°;
-            // adding 90° + wrap puts north at 0° and east at 90°,
-            // matching the convention above.
+            // adding 90° + wrap puts north at 0° and east at 90°.
             let angle = (dy.atan2(dx).to_degrees() + 90.0 + 360.0) % 360.0;
             let in_range = if theta_start_deg <= theta_end_deg {
                 angle >= theta_start_deg && angle <= theta_end_deg
@@ -137,9 +135,8 @@ pub fn draw_arc(
     }
 }
 
-/// Concentric-arc fingerprint icon centered at (`cx`, `cy`). `size`
-/// is the diameter in pixels. Four arcs from outer to inner with a
-/// gap at the bottom — recognizable as a fingerprint at sizes ≥ 24px.
+/// Concentric-arc fingerprint icon at (`cx`, `cy`). `size` is the
+/// diameter; reads as a fingerprint above ~24px.
 pub fn draw_fingerprint_icon(
     canvas: &mut [u8],
     cw: u32,
