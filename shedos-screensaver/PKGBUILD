@@ -8,7 +8,7 @@
 
 pkgname=shedos-screensaver
 pkgver=2026.05.08
-pkgrel=3
+pkgrel=4
 pkgdesc='Animated screensaver: TTY + Wayland backends, 8 styles, audio-reactive'
 arch=('x86_64')
 url='https://github.com/theshedman/shedos'
