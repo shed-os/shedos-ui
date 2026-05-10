@@ -110,7 +110,7 @@ impl Effect for Tetris {
                 if r < 0 || r >= self.rows as i32 {
                     continue;
                 }
-                // Falling block — slightly dimmer than landed.
+                // Falling block: slightly dimmer than landed.
                 let brightness = 0.6 + 0.4 * eased;
                 let fg = scale(b.color, brightness);
                 frame.set(r as u16, b.end_col, Cell {
@@ -121,7 +121,7 @@ impl Effect for Tetris {
                 });
             } else {
                 all_landed = false;
-                // Hasn't started — empty.
+                // Hasn't started; empty.
             }
         }
 

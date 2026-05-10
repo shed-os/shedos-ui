@@ -88,7 +88,7 @@ impl Effect for Shockwave {
                     attrs: Default::default(),
                 });
             } else if c.dist < front {
-                // In the leading edge — bright white-hot fading to target.
+                // In the leading edge: bright white-hot fading to target.
                 let edge_t = (front - c.dist) / EDGE_WIDTH;
                 let r_ch = lerp_u8(0xff, c.color.r, edge_t);
                 let g_ch = lerp_u8(0xff, c.color.g, edge_t);
@@ -100,7 +100,7 @@ impl Effect for Shockwave {
                     attrs: Default::default(),
                 });
             }
-            // else hidden — wave hasn't reached yet
+            // else hidden: wave hasn't reached yet
         }
 
         progress >= 1.0

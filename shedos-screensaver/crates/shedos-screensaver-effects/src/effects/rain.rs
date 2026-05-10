@@ -135,7 +135,7 @@ impl Effect for Rain {
                 }
             } else {
                 all_landed = false;
-                // Hasn't started yet — leave canvas blank at this position.
+                // Hasn't started yet; leave canvas blank at this position.
             }
         }
 

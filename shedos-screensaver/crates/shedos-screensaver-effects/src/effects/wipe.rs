@@ -83,7 +83,7 @@ impl Effect for Wipe {
                     attrs: Default::default(),
                 });
             } else if c.distance < front {
-                // In the leading edge — bright accent color (white-ish).
+                // In the leading edge: bright accent color (white-ish).
                 let edge_progress = (front - c.distance) / FRONT_WIDTH;
                 // Mix from full white at front (edge_progress=0) to
                 // c.color at trailing edge (edge_progress=1).
@@ -97,7 +97,7 @@ impl Effect for Wipe {
                     attrs: Default::default(),
                 });
             } else {
-                // Ahead of front — hidden.
+                // Ahead of front: hidden.
             }
         }
 

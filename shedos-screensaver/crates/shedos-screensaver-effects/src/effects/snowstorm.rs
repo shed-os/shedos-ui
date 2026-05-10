@@ -112,7 +112,7 @@ impl Effect for Snowstorm {
                 continue;
             }
             if progress >= f.arrival_t {
-                // Settled — render the target cell.
+                // Settled: render the target cell.
                 frame.set(f.target_row, f.target_col, Cell {
                     ch: f.target_ch,
                     fg: f.target_color,
