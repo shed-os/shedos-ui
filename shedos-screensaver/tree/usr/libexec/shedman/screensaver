@@ -1,5 +1,5 @@
 #!/bin/bash
-# Thin shim — `shedman` autodiscovers /usr/libexec/shedman/* as
+# Thin shim; `shedman` autodiscovers /usr/libexec/shedman/* as
 # subcommands; the actual binary lives at /usr/bin/shedos-screensaver
 # so users can also invoke it directly (e.g. via systemd-run from
 # hypridle, or from i3/sway sessions where shedman isn't installed).

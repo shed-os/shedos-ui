@@ -1,4 +1,4 @@
-# /etc/shedos/screensaver.toml — default settings for shedos-screensaver.
+# /etc/shedos/screensaver.toml; default settings for shedos-screensaver.
 #
 # This file is backed up by pacman: edits survive package upgrades
 # (pacman writes the new packaged version to .pacnew if the maintainer
@@ -38,7 +38,7 @@ hold = 3.0
 mode = "auto"
 
 # Audio reactivity. "desktop" captures system audio (requires a
-# *.monitor input device — see /usr/share/doc/shedos-screensaver/
+# *.monitor input device; see /usr/share/doc/shedos-screensaver/
 # audio-setup.md). "mic" captures from the default microphone.
 # "none" disables audio reactivity.
 audio_source = "none"
