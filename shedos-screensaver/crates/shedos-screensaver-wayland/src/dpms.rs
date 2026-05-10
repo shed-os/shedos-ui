@@ -1,10 +1,8 @@
 //! Per-output power management via `wlr-output-power-management-v1`.
 //!
-//! Caller binds the manager once, asks for one power object per
-//! output, and sends `set_mode(On|Off)` to drive the panel. The
-//! compositor's response is informational — `mode` confirms the
-//! transition; `failed` means it refused, after which the proxy is
-//! inert and further requests are no-ops.
+//! Bind the manager once, request one power object per output, then
+//! drive the panel via `set_mode(On|Off)`. `failed` events leave the
+//! proxy inert.
 
 use crate::surface::AppState;
 use wayland_client::{globals::GlobalList, Connection, Dispatch, Proxy, QueueHandle};

@@ -9,18 +9,14 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-/// PAM conversation handler dedicated to the fingerprint thread.
-/// pam_fprintd communicates via `TEXT_INFO` ("Place your finger") and
-/// `ERROR_MSG` ("Failed to match fingerprint"). The error path is the
-/// per-scan rejection signal — fired by pam_fprintd immediately when
-/// libfprint reports `verify-no-match`, well before the outer
-/// pam_authenticate() returns its aggregate `MaxTries`. We forward
-/// each `ERROR_MSG` through the same channel as the success signal so
-/// the lock UI flashes red within milliseconds of a failed scan
-/// instead of waiting 30s for the outer call's MaxTries.
+/// PAM conversation handler for the fingerprint thread. pam_fprintd
+/// fires `ERROR_MSG` on every `verify-no-match`, well before its outer
+/// pam_authenticate() returns the aggregate `MaxTries`. Forwarding
+/// those errors to the channel as they happen lets the lock UI flash
+/// red within milliseconds instead of waiting ~30s for the aggregate.
 ///
 /// `prompt_echo`/`prompt_blind` are required by the trait but
-/// pam_fprintd never invokes those styles.
+/// pam_fprintd never invokes them.
 struct FingerprintConv {
     username: String,
     tx: Sender<std::result::Result<(), ()>>,
@@ -35,14 +31,11 @@ impl Conversation for FingerprintConv {
         CString::new("").map_err(|_| ())
     }
     fn info(&mut self, _msg: &CStr) {
-        // pam_fprintd's "Place your finger" — informational, no
-        // user-facing state change. The icon's idle color is already
-        // the affordance that says "ready for a touch."
+        // pam_fprintd's "Place your finger" — informational only.
     }
     fn error(&mut self, _msg: &CStr) {
         // pam_fprintd's "Failed to match fingerprint" — fires per
-        // verify-no-match. Push immediately so the lock UI sees the
-        // failure event in real time.
+        // verify-no-match. Push immediately for real-time UI feedback.
         let _ = self.tx.send(Err(()));
         self.ping.ping();
     }
@@ -102,18 +95,15 @@ impl PamSession {
     }
 }
 
-/// Result of probing fprintd for the user's enrolled fingers. `None`
-/// means the lock surface should not show the fingerprint UI — fprintd
-/// is missing, no device is present, or no fingers are enrolled. `Some`
-/// means the lock surface should show the icon + hint text and listen
-/// on a parallel auth thread.
+/// Enrolled-finger summary returned when fprintd has at least one.
 #[derive(Debug, Clone)]
 pub struct FingerprintInfo {
     pub finger_count: usize,
 }
 
-/// Probe `fprintd-list <username>` for enrolled fingers, with a 2-second
-/// hard timeout so a hung daemon doesn't block lock-screen startup.
+/// Probe `fprintd-list <username>` with a 2-second timeout so a hung
+/// daemon doesn't block lock startup. Returns None when fprintd is
+/// missing, no device is present, or no fingers are enrolled.
 pub fn fingerprint_available(username: &str) -> Option<FingerprintInfo> {
     let output = Command::new("timeout")
         .arg("2")
@@ -136,18 +126,14 @@ pub fn fingerprint_available(username: &str) -> Option<FingerprintInfo> {
     }
 }
 
-/// Spawn a background thread that authenticates the user via the
-/// `shedos-screensaver-fp` PAM service. The conversation handler
-/// (`FingerprintConv`) emits `Err(())` on the channel for every
-/// `verify-no-match` reported by pam_fprintd as soon as it happens —
-/// real-time per-scan feedback. The auth thread itself only emits
-/// `Ok(())` on the outer pam_authenticate success; aggregate
-/// `MaxTries` returns are NOT surfaced as flashes because they fire
-/// after pam_fprintd's internal 3-cycle retry, which is much later
-/// than the user's actual touch and confuses the cause-effect link.
+/// Spawn a thread that authenticates via `shedos-screensaver-fp`.
+/// `FingerprintConv` emits `Err(())` for every `verify-no-match` as
+/// it happens; the thread itself emits `Ok(())` on outer success.
 ///
-/// On any pam_authenticate Err the thread still loops (after a brief
-/// pause) so the user can keep trying. The thread exits on success.
+/// Aggregate `MaxTries` returns are not surfaced. They fire after
+/// pam_fprintd's internal 3-cycle retry, far after the user's touch.
+///
+/// The thread loops on Err so the user can keep trying; exits on success.
 pub fn spawn_fingerprint_auth_loop(
     username: String,
     ping: Ping,
@@ -173,12 +159,10 @@ pub fn spawn_fingerprint_auth_loop(
                     return;
                 }
                 Err(e) => {
-                    // Per-scan failures were already pushed by the
-                    // FingerprintConv::error hook in real time. Don't
-                    // emit another aggregate Err here — the old
-                    // behavior of flashing red on the outer MaxTries
-                    // return showed up 30 seconds after the user's
-                    // last touch and felt unrelated.
+                    // Per-scan failures already pushed via
+                    // FingerprintConv::error. Don't emit aggregate
+                    // Err here — outer MaxTries fires ~30s after the
+                    // user's last touch and feels unrelated.
                     eprintln!(
                         "shedos-screensaver: pam-fp authenticate: {:?}",
                         e.0

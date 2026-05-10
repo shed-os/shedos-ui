@@ -1,9 +1,8 @@
 //! Pure state machine for the four-phase lock-screen cycle.
 //!
-//! Holds no Wayland, PAM, or rendering state — just timestamps and a
-//! discriminant. Callers call `tick(now)` on every event-loop wakeup
-//! and `on_input(now)` on every keystroke, then act on the current
-//! `phase()` (render screensaver, render prompt, send DPMS off, etc).
+//! No Wayland, PAM, or render state, just timestamps and a phase
+//! discriminant. Callers `tick(now)` per event-loop wake and
+//! `on_input(now)` per keystroke, then act on `phase()`.
 
 use std::time::{Duration, Instant};
 
@@ -52,10 +51,9 @@ impl LockState {
         self.screensaver_visits
     }
 
-    /// Apply every time-driven transition that is due as of `now`. May
-    /// chain transitions (e.g. T3 elapsed → Screensaver, then visits
-    /// reaches N → Dpms) so a single call always leaves the state at
-    /// rest.
+    /// Apply every time-driven transition due as of `now`. May chain
+    /// transitions (e.g. T3 elapsed → Screensaver, then visits ≥ N
+    /// → Dpms) so a single call settles the state.
     pub fn tick(&mut self, now: Instant) {
         loop {
             let prev = self.phase;
@@ -102,9 +100,8 @@ impl LockState {
     }
 
     /// Wall-clock duration from `now` until the next time-driven
-    /// transition. `None` in `Dpms` (no time-driven exit; only input
-    /// can leave). Lets the event loop arm a calloop timer for the
-    /// exact wake-up instant rather than polling.
+    /// transition. `None` in `Dpms` (only input leaves it). Lets the
+    /// event loop arm a calloop timer rather than polling.
     pub fn time_until_next_transition(&self, now: Instant) -> Option<Duration> {
         match self.phase {
             LockPhase::Screensaver => {
@@ -423,12 +420,10 @@ mod tests {
         assert_eq!(remaining, Duration::ZERO);
     }
 
-    // (No `time_until_transition_screensaver_at_n_is_zero` test:
-    // `tick`'s chained loop never leaves the state in
-    // Screensaver-with-visits>=N — that branch immediately advances to
-    // Dpms. The `Some(Duration::ZERO)` arm of `time_until_next_transition`
-    // exists as a defensive read against externally-constructed states
-    // and is unreachable through the normal tick/on_input API.)
+    // (No "screensaver_at_n_is_zero" test: `tick`'s chained loop
+    // immediately advances to Dpms in that case. The
+    // `Some(Duration::ZERO)` arm of `time_until_next_transition` is
+    // defensive code unreachable through the normal API.)
 
     #[test]
     fn time_until_transition_prompt_partway_through_t3() {
