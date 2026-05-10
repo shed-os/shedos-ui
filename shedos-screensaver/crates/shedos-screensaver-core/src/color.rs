@@ -22,18 +22,18 @@ impl Color {
     pub const MAGENTA: Self = Self::rgb(255, 0, 255);
     pub const CYAN: Self = Self::rgb(0, 255, 255);
 
-    /// Catppuccin Mocha shorthands — load-bearing brand defaults.
+    /// Catppuccin Mocha brand defaults.
     pub const BASE: Self = Catppuccin::MOCHA.base;
     pub const TEXT: Self = Catppuccin::MOCHA.text;
 
-    /// Parse a `--color` spec accepted on the CLI:
-    /// - `#rrggbb` or `rrggbb` (hex, 6 digits)
-    /// - `r,g,b` (decimal 0..=255 per channel)
-    /// - Named ANSI: `red green blue cyan magenta yellow white black`
-    /// - Catppuccin Mocha: `blue mauve peach text rosewater flamingo
-    ///   pink red maroon yellow green teal sky sapphire lavender
-    ///   subtext0 subtext1 surface0 surface1 surface2 base mantle
-    ///   crust overlay0 overlay1 overlay2`
+    /// Parse a `--color` spec: hex (`#rrggbb`/`rrggbb`), decimal RGB
+    /// (`r,g,b`), or a name. Names: traditional ANSI (red, green,
+    /// blue, cyan, magenta, yellow, white, black) or Catppuccin Mocha
+    /// (blue, mauve, peach, text, rosewater, flamingo, pink, red,
+    /// maroon, yellow, green, teal, sky, sapphire, lavender,
+    /// subtext0/1, surface0/1/2, base, mantle, crust, overlay0/1/2).
+    /// Catppuccin wins on overlapping names; pure ANSI is reachable
+    /// via hex.
     pub fn parse(spec: &str) -> Result<Self, ColorParseError> {
         let s = spec.trim();
         if s.is_empty() {
@@ -61,11 +61,9 @@ impl Color {
             return Ok(Self::rgb(r, g, b));
         }
 
-        // Named — try Catppuccin first (brand wins on overlaps like "blue",
-        // "red", "green", "yellow"), then fall through to traditional ANSI
-        // for non-Catppuccin names ("cyan", "magenta", "white", "black").
-        // Users wanting pure 255-saturation ANSI red/blue/etc. can pass
-        // "#ff0000" / "0,0,255" explicitly.
+        // Catppuccin first so brand wins on overlapping names (blue,
+        // red, green, yellow); ANSI fallthrough catches names not in
+        // Catppuccin (cyan, magenta, white, black).
         let lower = s.to_ascii_lowercase();
         if let Some(c) = Catppuccin::MOCHA.lookup(&lower) {
             return Ok(c);
@@ -152,10 +150,8 @@ mod tests {
 
     #[test]
     fn parse_catppuccin_shorthand_wins_on_overlap() {
-        // Brand wins: "red", "green", "blue", "yellow" all exist in both
-        // ANSI and Catppuccin; the bare names resolve to Catppuccin
-        // because brand cohesion is the default. Pure 255-saturation
-        // ANSI is reachable via hex (#ff0000 / 0,0,255).
+        // Bare names overlapping ANSI (red, green, blue, yellow)
+        // resolve to Catppuccin; pure ANSI is reachable via hex.
         assert_eq!(Color::parse("blue").unwrap(), Catppuccin::MOCHA.blue);
         assert_eq!(Color::parse("red").unwrap(), Catppuccin::MOCHA.red);
         assert_eq!(Color::parse("green").unwrap(), Catppuccin::MOCHA.green);

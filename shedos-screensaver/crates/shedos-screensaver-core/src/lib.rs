@@ -1,8 +1,7 @@
 //! Foundation types shared by every screensaver crate.
 //!
 //! No I/O beyond reading the logo file; no terminal or Wayland deps.
-//! Backends and styles depend on this crate; this crate depends on
-//! nothing outside `std`.
+//! Depends on nothing outside `std`.
 
 pub mod audio;
 pub mod catppuccin;

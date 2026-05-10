@@ -4,23 +4,16 @@ use std::path::{Path, PathBuf};
 /// Where shedos-branding installs the canonical SHEDOS art.
 pub const DEFAULT_LOGO_PATH: &str = "/etc/shedos-ascii.txt";
 
-/// Compile-time copy of the canonical SHEDOS art. Pulled directly
-/// from the shedos-branding tree so the screensaver crate can never
-/// fall out of sync with what fastfetch and other consumers see.
-/// `Logo::load_default()` falls back to this when the runtime path
-/// is missing (e.g. running the binary on a dev box without
-/// shedos-branding installed) — there is no scenario in which a
-/// shedos-screensaver invocation lacks the real SHEDOS art.
+/// Compile-time copy of the canonical SHEDOS art. Pulled from the
+/// shedos-branding tree so the screensaver can't drift from
+/// fastfetch's source. `Logo::load_default()` falls back to this
+/// when the runtime path is missing.
 pub const EMBEDDED_SHEDOS_ART: &str =
     include_str!("../../../../shedos-branding/tree/etc/shedos-ascii.txt");
 
-/// The SHEDOS ASCII art, parsed into a row-major grid of cells +
-/// a derived binary mask (true = lit cell, false = blank).
-///
-/// The shedos-branding package ships exactly one consumer-canonical
-/// file at `/etc/shedos-ascii.txt`; this loader reads it once at
-/// startup and exposes the result to every style that needs the
-/// logo (logo-bounce, conway, starfield, tunnel, mandala).
+/// SHEDOS ASCII art parsed into a row-major grid plus a derived
+/// binary mask (true = lit, false = blank). Loaded once from
+/// `/etc/shedos-ascii.txt`.
 #[derive(Clone, Debug)]
 pub struct Logo {
     pub source_path: PathBuf,
@@ -32,9 +25,8 @@ pub struct Logo {
 
 impl Logo {
     /// Load the canonical SHEDOS art. Tries `/etc/shedos-ascii.txt`
-    /// first (so a shedos-branding update is picked up live without
-    /// rebuilding the screensaver), falls back to the compile-time
-    /// embedded copy. Never fails.
+    /// first so a shedos-branding update is picked up live; falls
+    /// back to the embedded copy. Never fails.
     pub fn load_default() -> Self {
         match Self::load(Path::new(DEFAULT_LOGO_PATH)) {
             Ok(l) => l,
@@ -190,9 +182,7 @@ mod tests {
 
     #[test]
     fn load_default_falls_back_to_embedded() {
-        // Even on a dev box without shedos-branding installed, this
-        // returns the real SHEDOS art rather than panicking or
-        // returning a placeholder.
+        // Returns real art even on a dev box without shedos-branding.
         let l = Logo::load_default();
         assert!(l.rows > 0);
         assert!(l.cols > 0);

@@ -1,6 +1,6 @@
-//! Catppuccin Mocha palette — the canonical ShedOS brand colors.
-//! Mirrors the values pinned across the rest of the distro
-//! (Hyprland border, lock-screen prompt, fastfetch ANSI_COLOR).
+//! Catppuccin Mocha palette: the canonical ShedOS brand colors,
+//! pinned across the distro (Hyprland border, lock-screen prompt,
+//! fastfetch ANSI_COLOR).
 
 use crate::color::Color;
 
@@ -105,9 +105,8 @@ mod tests {
 
     #[test]
     fn brand_blue_matches_hyprland_border() {
-        // The ShedOS-wide brand blue is #89b4fa (Catppuccin "blue").
-        // It lands in os-release ANSI_COLOR, the lock-screen prompt outline,
-        // and dozens of other surfaces. Verify the constant.
+        // ShedOS brand blue: #89b4fa (Catppuccin "blue"). Verify the
+        // constant matches.
         assert_eq!(Catppuccin::MOCHA.blue, Color::rgb(0x89, 0xb4, 0xfa));
     }
 

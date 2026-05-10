@@ -3,12 +3,11 @@ use signal_hook::flag;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Listens for SIGINT / SIGTERM / SIGUSR1 and sets the returned
-/// flag once any of them fires. The frame loop polls this flag at
-/// the top of each iteration and exits cleanly when set.
+/// Listens for SIGINT, SIGTERM, SIGUSR1 and sets the returned flag
+/// when any fires. The frame loop polls it per iteration and exits.
 ///
-/// SIGUSR1 is the channel hypridle's `on-resume` uses to tear down
-/// the `--idle-daemon` instance the moment the user touches input.
+/// SIGUSR1 is hypridle's `on-resume` channel for tearing down the
+/// `--idle-daemon` instance on user input.
 pub struct SignalListener {
     flag: Arc<AtomicBool>,
 }

@@ -43,8 +43,8 @@ impl Clock for RealClock {
     }
 }
 
-/// Deterministic clock for tests — `tick()` advances time;
-/// `elapsed()` is monotonic and never moves on its own.
+/// Deterministic clock for tests. `tick()` advances time; `elapsed()`
+/// is monotonic and never moves on its own.
 #[derive(Debug)]
 pub struct MockClock {
     inner: Mutex<Duration>,

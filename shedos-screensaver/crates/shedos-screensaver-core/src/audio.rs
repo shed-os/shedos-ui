@@ -1,6 +1,6 @@
-//! Pure-data definition of an audio analysis frame, lifted into core
-//! so styles can consume it without pulling in pipewire (the actual
-//! capture lives in `shedos-screensaver-audio`).
+//! Audio analysis frame, lifted into core so styles can consume it
+//! without pulling in pipewire. Capture lives in
+//! `shedos-screensaver-audio`.
 
 pub const NUM_BANDS: usize = 32;
 
