@@ -1,17 +1,15 @@
-//! Per-output layer-shell overlay surfaces + the Wayland event loop
+//! Per-output layer-shell overlay surfaces and the Wayland event loop
 //! that drives independent frame producers per monitor.
 //!
 //! Single monitor: one layer surface anchored to all four edges of
-//! the only `wl_output`, layered above everything. Multi-monitor: N
-//! surfaces, one per `wl_output`, each with its own frame producer
-//! so each screen runs an independent (LogoVariant, Effect) cycle.
+//! the only `wl_output`. Multi-monitor: N surfaces, one per output,
+//! each with its own frame producer so screens run independent
+//! (LogoVariant, Effect) cycles.
 //!
-//! The `producer_factory` closure mints producers lazily as outputs
-//! appear (boot-time and via hotplug). For resources that exist
-//! once-per-process (like the cpal audio stream) the closure typically
-//! `take()`s an Option on first call so a single output gets it and
-//! later outputs get `None` — the audio-reactive effects fall back to
-//! their silence path on those screens.
+//! `producer_factory` mints producers lazily as outputs appear (boot
+//! and hotplug). For once-per-process resources (cpal audio stream)
+//! the closure `take()`s an Option on first call; later outputs get
+//! `None` and audio-reactive effects fall back to silence.
 
 use crate::font::FontAtlas;
 use crate::lock::LockBinding;
@@ -56,18 +54,15 @@ use std::time::{Duration, Instant};
 
 const ERROR_HOLD: Duration = Duration::from_secs(2);
 
-/// How long the fingerprint icon stays in its post-attempt color
-/// before fading back to Idle (Failure) or releasing the lock
-/// (Success). Both dwell long enough for the user to register the
-/// state — 300ms was empirically too brief; the wayland frame
-/// double-buffer + compositor scheduling could swallow the green
-/// frame before the user noticed it.
+/// Post-attempt dwell for the fingerprint icon before fading to Idle
+/// (Failure) or releasing the lock (Success). 300ms was empirically
+/// too brief: wayland double-buffering and compositor scheduling could
+/// swallow the frame before the user noticed it.
 const FP_FAILURE_HOLD: Duration = Duration::from_millis(1000);
 const FP_SUCCESS_HOLD: Duration = Duration::from_millis(900);
 
-/// Catppuccin Mocha green (the theme palette doesn't carry a `green`
-/// field today, so we hardcode the Mocha shade here. If a future
-/// theme schema adds `green`, swap this for `theme.green`).
+/// Catppuccin Mocha green. Hardcoded because the theme schema has no
+/// `green` field today; swap to `theme.green` if one is added.
 const FP_SUCCESS_GREEN_ARGB: u32 = 0xFFA6E3A1;
 
 #[derive(Clone, Copy, Default)]
@@ -91,15 +86,12 @@ use wayland_protocols_wlr::output_power_management::v1::client::{
     zwlr_output_power_v1::{Mode as DpmsMode, ZwlrOutputPowerV1},
 };
 
-/// Mints frame producers — one per output. Called as outputs are
-/// discovered (boot-time and via hotplug). Closures with `take()`-able
-/// captures are the canonical way to hand single-instance resources
-/// to the first call only.
+/// Mints one frame producer per output. Called at boot and on
+/// hotplug. Use `take()`-able captures for single-instance resources.
 pub type ProducerFactory = Box<dyn FnMut() -> Box<dyn FrameProducer>>;
 
-/// Renderer entry point. Discovers every wl_output the compositor
-/// advertises and runs an independent layer surface + frame producer
-/// on each.
+/// Renderer entry point. One layer surface + frame producer per
+/// wl_output the compositor advertises.
 pub struct WaylandRenderer;
 
 impl WaylandRenderer {
@@ -262,10 +254,9 @@ impl WaylandRenderer {
             .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
         let loop_handle = event_loop.handle();
 
-        // Register the fingerprint-thread ping source so a successful
-        // (or failed) scan immediately wakes the wayland loop. The
-        // callback is a no-op — actual result handling reads from the
-        // receiver in the render loop.
+        // Fingerprint-thread ping source: wakes the wayland loop on
+        // each scan completion. The callback is a no-op; result
+        // handling reads from the channel in the render loop.
         if let Some(source) = fingerprint_ping_source {
             loop_handle
                 .insert_source(source, |_, _, _state: &mut AppState| {})
@@ -276,9 +267,8 @@ impl WaylandRenderer {
 
         let mut wayland_source = WaylandSource::new(conn.clone(), event_queue);
 
-        // All synchronous wayland operations happen via wayland_source.queue()
-        // BEFORE the source is inserted into the event loop. After insert,
-        // the loop owns the queue.
+        // Sync wayland ops via wayland_source.queue() must happen
+        // before insert; after insert, the loop owns the queue.
         wayland_source
             .queue()
             .roundtrip(&mut state)
@@ -296,10 +286,10 @@ impl WaylandRenderer {
         let lock = manager.lock(&qh, ());
         state.lock_binding = Some(LockBinding::new(lock));
 
-        // Hyprland sends `Locked` only after we commit our first lock-surface
-        // buffers, so the roundtrip catches any immediate `Finished` from a
-        // policy denial; otherwise we proceed to mint surfaces and let the
-        // render loop drive configure + commit.
+        // Hyprland sends `Locked` only after we commit our first
+        // lock-surface buffers, so this roundtrip catches an immediate
+        // `Finished` from a policy denial. Otherwise mint surfaces and
+        // let the render loop drive configure + commit.
         wayland_source
             .queue()
             .roundtrip(&mut state)
@@ -337,9 +327,9 @@ impl WaylandRenderer {
     }
 }
 
-// Sentinel checked by relock-on-restart after a compositor crash —
-// presence means "the session was locked when Hyprland died, so
-// re-engage the lock now that it's back."
+// Sentinel checked by relock-on-restart after a compositor crash:
+// presence means the session was locked when Hyprland died, so
+// re-engage the lock now that it's back.
 fn lock_sentinel_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(|d| PathBuf::from(d).join("shedos-locked"))
@@ -371,20 +361,14 @@ fn run_loop(
     event_loop: &mut EventLoop<AppState>,
 ) -> Result<(), WaylandError> {
     // Render-then-dispatch ordering is load-bearing: dispatching first
-    // would block on the initial iteration because the configure event
-    // has already been consumed by the pre-insert roundtrip and no
-    // further events arrive until we commit the first buffer. Render
-    // first, then block on dispatch waiting for the next event (frame
-    // callback, key, configure, state-machine deadline, etc.).
+    // would block because the initial configure was already consumed
+    // by the pre-insert roundtrip. Render first, then block on dispatch.
     while !state.terminating() {
-        // Drain any pending fingerprint-thread results. A successful
-        // scan flashes the icon green for FP_SUCCESS_HOLD and then
-        // unlocks; a failed scan flashes red for FP_FAILURE_HOLD and
-        // returns to Idle. We deliberately do NOT surface fingerprint
-        // failures on the prompt's error line — that's the password
-        // input's slot, and a finger-not-recognized event isn't a
-        // "wrong password" the user needs a banner for. The icon
-        // color change IS the feedback.
+        // Drain pending fingerprint results. Success flashes green
+        // (FP_SUCCESS_HOLD) then unlocks; failure flashes red
+        // (FP_FAILURE_HOLD) then returns to Idle. Fingerprint failures
+        // don't surface on the error line; that slot is for password
+        // errors, and the icon color is the fingerprint feedback.
         let now = Instant::now();
         let fp_results: Vec<Result<(), ()>> = state
             .fingerprint_rx
@@ -398,10 +382,9 @@ fn run_loop(
             };
             state.mark_all_dirty();
         }
-        // Honor the post-attempt dwell: clear an expired Failure back
-        // to Idle (and redraw); release the lock when the Success
-        // dwell expires (the green flash is visible for at least one
-        // render before the surface tears down).
+        // Post-attempt dwell: expire Failure back to Idle (and redraw);
+        // release the lock when Success dwell expires (so the green
+        // flash gets at least one render).
         match state.fingerprint_status {
             FingerprintStatus::Failure(until) if Instant::now() >= until => {
                 state.fingerprint_status = FingerprintStatus::Idle;
@@ -414,7 +397,7 @@ fn run_loop(
         }
 
         // In lock mode, advance the state machine and react to any
-        // phase change before rendering — the new phase decides what
+        // phase change before rendering; the new phase decides what
         // gets drawn.
         let transition = state.lock_state.as_mut().and_then(|ls| {
             let prev = ls.phase();
@@ -437,10 +420,9 @@ fn run_loop(
             break;
         }
 
-        // Sleep exactly until the next state-machine deadline OR the
-        // fingerprint-status dwell expires (whichever first), or
-        // until a Wayland event arrives. In layer-shell mode
-        // lock_state is None so we just wait for events.
+        // Sleep until the next state-machine deadline or fingerprint
+        // dwell expiry, whichever first, or until a Wayland event
+        // arrives. In layer-shell mode lock_state is None.
         let now = Instant::now();
         let lock_timeout = state
             .lock_state
@@ -797,9 +779,8 @@ impl AppState {
             }
         }
 
-        // Lock mode Prompt phase → prompt UI only, no screensaver
-        // running behind it. Every other case (layer-shell mode and
-        // lock-mode Screensaver phase) renders the full screensaver.
+        // Lock-mode Prompt phase: prompt UI only. Otherwise (layer-
+        // shell or lock-mode Screensaver) render the full screensaver.
         if self.is_lock_mode && matches!(phase, Some(LockPhase::Prompt)) {
             self.render_lock_prompt(idx)
         } else {
@@ -845,9 +826,8 @@ impl AppState {
             .map(|n| format!("Hi, {n}"))
             .unwrap_or_else(|| "Hi".to_string());
         let fingerprint = self.fingerprint_hint.as_deref().map(|idle_hint| {
-            // Color + hint vary by post-attempt state so the user sees
-            // immediate visual feedback that the system registered
-            // their finger (vs the icon being a static decoration).
+            // Color + hint vary by post-attempt state so the user
+            // sees feedback per scan.
             let (icon_color_argb, hint) = match self.fingerprint_status {
                 FingerprintStatus::Idle => (theme.accent, idle_hint),
                 FingerprintStatus::Failure(_) => {
@@ -1160,9 +1140,9 @@ impl KeyboardHandler for AppState {
             return;
         }
 
-        // Feed the input into the state machine first so a keypress
-        // in Screensaver or Dpms transitions to Prompt before we
-        // decide what to do with the key itself.
+        // Feed input to the state machine first; a keypress in
+        // Screensaver or Dpms transitions to Prompt before we
+        // dispatch the key.
         let transition = self.lock_state.as_mut().and_then(|ls| {
             let prev = ls.phase();
             ls.on_input(Instant::now());
@@ -1244,8 +1224,7 @@ impl LayerShellHandler for AppState {
         if let Some(idx) = self.surface_index_by_layer(layer) {
             self.surfaces.remove(idx);
         }
-        // If the compositor closed every surface we owned, treat it
-        // as a dismiss — there's nothing left to render to.
+        // If the compositor closed every surface, treat as a dismiss.
         if self.surfaces.is_empty() {
             self.input_dismissed = true;
         }
@@ -1261,12 +1240,10 @@ impl LayerShellHandler for AppState {
         let Some(idx) = self.surface_index_by_layer(layer) else {
             return;
         };
-        // Per the wlr-layer-shell-unstable-v1 spec, a `configure` with
-        // dimension zero in either axis means "compositor leaves it
-        // up to the client". Some compositors (Hyprland on certain
-        // builds) send (0, 0) for fullscreen-anchored overlays; fall
-        // back to the output's logical or current-mode dimensions so
-        // we always end up with a usable size.
+        // wlr-layer-shell spec: `configure` with a zero dimension means
+        // "compositor leaves it to the client". Hyprland sends (0, 0)
+        // for fullscreen-anchored overlays; fall back to the output's
+        // logical or current-mode size.
         let output = self.surfaces[idx].output.clone();
         let (mut w, mut h) = configure.new_size;
         if w == 0 || h == 0 {
