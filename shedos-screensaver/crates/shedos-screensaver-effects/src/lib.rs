@@ -1,17 +1,13 @@
-//! Animation effects that *form* an ASCII-art target into existence
+//! Animation effects that form an ASCII-art target into existence
 //! on a canvas.
 //!
-//! The model: you start with a blank canvas and a target Frame
-//! (the desired final state — e.g. a SHEDOS variant rendered at the
-//! canvas size), and the effect's job is to drive the canvas from
-//! blank → target through some visually interesting intermediate
-//! frames.
+//! Start with a blank canvas and a target Frame (the desired final
+//! state, e.g. a SHEDOS variant). The effect drives the canvas from
+//! blank to target through intermediate frames.
 //!
-//! Every effect implements [`Effect`]; the catalog of registered
-//! effects lives in [`registry::Registry`]. New effects drop into
-//! `effects/<name>.rs`, register in [`registry::Registry::new`],
-//! and are picked up automatically by `--effect random` and the
-//! shuffle engine.
+//! Every effect implements [`Effect`]; the catalog lives in
+//! [`registry::Registry`]. New effects drop into `effects/<name>.rs`
+//! and register in [`Registry::new`].
 
 pub mod easing;
 pub mod effects;
@@ -24,14 +20,13 @@ pub use shedos_screensaver_core::{AudioFrame, Cell, Color, Frame};
 use rand_chacha::ChaCha8Rng;
 use std::time::Duration;
 
-/// Per-effect context handed to setup() and step(). Effects use it
-/// to pick transient colors, seed RNG, and consume audio.
+/// Per-effect context handed to setup() and step().
 pub struct EffectCtx<'a> {
-    /// Color the resolved art should land on. Effects pick a
-    /// transient/animated color separately.
+    /// Color the resolved art lands on. Effects pick a transient
+    /// color separately.
     pub final_color: Color,
     /// Deterministic RNG (process-seeded in live mode, fixed-seed
-    /// in tests). Effects should use this rather than thread_rng.
+    /// in tests). Use this, not thread_rng.
     pub rng: &'a mut ChaCha8Rng,
 }
 
@@ -39,9 +34,8 @@ pub struct EffectCtx<'a> {
 ///
 /// Lifecycle:
 /// 1. Construct via factory (`Registry::instantiate`).
-/// 2. `setup(target, ctx)` — capture the target Frame, plan animation.
+/// 2. `setup(target, ctx)`: capture target, plan animation.
 /// 3. `step(frame, dt, audio)` repeatedly until it returns `true`.
-///    Each call updates the canvas in place toward the target.
 /// 4. `reset()` to start over for `--shuffle` rotations.
 pub trait Effect: Send {
     /// Stable kebab-case identifier (used by `--effect=NAME`).
@@ -57,8 +51,7 @@ pub trait Effect: Send {
     /// `--shuffle` and `--duration` planning.
     fn duration(&self) -> Duration;
 
-    /// True if this effect's reactivity is enhanced when audio is fed in.
-    /// (All effects work without audio; some look better with it.)
+    /// True if audio input enhances this effect.
     fn reactive(&self) -> bool {
         false
     }
@@ -67,10 +60,9 @@ pub trait Effect: Send {
     /// of the target and plans its animation.
     fn setup(&mut self, target: &Frame, ctx: &mut EffectCtx<'_>);
 
-    /// Advance the animation by `dt` and write the current state
-    /// into `frame`. Returns `true` once the canvas equals the target
-    /// (the effect has finished). After the first `true`, additional
-    /// step calls should remain no-ops or keep returning true.
+    /// Advance the animation by `dt` and write the current state into
+    /// `frame`. Returns `true` once the canvas equals the target.
+    /// Subsequent step calls remain no-ops.
     fn step(
         &mut self,
         frame: &mut Frame,

@@ -9,9 +9,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 // Pick a canvas size that triggers auto-scaling for the test logo
-// (5×23). At 40×120 the auto-scale factor lands at 3 (= 15×69 rendered)
-// — exercises the post-scale code paths that the previous 10×50 canvas
-// silently bypassed.
+// (5×23). 40×120 lands at scale 3 and exercises the post-scale code
+// paths a smaller canvas would bypass.
 const ROWS: u16 = 40;
 const COLS: u16 = 120;
 const SEED: u64 = 0xCAFEF00DBADBABE5;
@@ -81,12 +80,11 @@ fn every_effect_lands_on_target_after_completion() {
             }
         }
 
-        // After completion, every lit cell of the target should be set
-        // in the canvas (glyph match; the color may vary because some
-        // effects pick their own — we check glyphs, not colors).
-        // Allow effects like `colorshift` and `decrypt` that overwrite
-        // with their own glyphs at the very end-state — we only require
-        // that for *most* lit cells the glyphs match.
+        // After completion, every lit target cell should be set in
+        // the canvas (glyph match only; colors vary because some
+        // effects pick their own). Allow colorshift/decrypt-style
+        // effects that overwrite glyphs at end-state by requiring
+        // most cells, not all.
         let total_lit_cells = target_frame
             .cells()
             .filter(|(_, _, cell)| cell.ch != ' ')
@@ -98,9 +96,9 @@ fn every_effect_lands_on_target_after_completion() {
                     && canvas.get(*r, *c).map(|cc| cc.ch == target_cell.ch).unwrap_or(false)
             })
             .count();
-        // Require ≥80% of target cells to be glyph-correct after
-        // completion — gives latitude to colorshift / decrypt-style
-        // effects that may render unusual glyphs in their final frame.
+        // Require ≥80% of target cells to be glyph-correct, giving
+        // latitude to colorshift / decrypt-style effects that render
+        // unusual glyphs in the final frame.
         let ratio = matching as f32 / total_lit_cells.max(1) as f32;
         assert!(
             ratio >= 0.80,

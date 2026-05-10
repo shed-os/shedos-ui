@@ -1,9 +1,7 @@
-//! Verifies that on a wide canvas (where auto-scale kicks in),
-//! every effect actually completes with a target-matching canvas.
-//! The previous integration test used a 40×120 canvas which scales
-//! the test logo to 3×, but kept an 80% match threshold — that left
-//! room for end-state mismatches that the user noticed visually.
-//! This file tightens the assertion to 100% and uses a canvas large
+//! Wide-canvas effect tests with a strict end-state assertion.
+//!
+//! The integration test uses a 40×120 canvas at an 80% match
+//! threshold; this file tightens that to ~100% on a canvas large
 //! enough to exercise scale=3 across all effect implementations.
 
 use rand::SeedableRng;
@@ -30,8 +28,7 @@ fn small_logo() -> Logo {
 }
 
 fn real_block_logo() -> Logo {
-    // The packaged `block` variant — same one the binary actually
-    // runs at. 5 rows × 47 cols.
+    // The packaged `block` variant (5 rows × 47 cols).
     Logo::parse(
         "███████ ██   ██ ███████ ██████  ██████  ███████\n\
          ██      ██   ██ ██      ██   ██ ██   ██ ██\n\
@@ -61,11 +58,10 @@ fn run_effect_to_completion(
 
 #[test]
 fn every_effect_finishes_with_a_solid_target_no_residue() {
-    // Strict end-state contract: at progress=1.0, the canvas must be
-    // EXACTLY the target — every target cell drawn at its target glyph
-    // AND zero non-target cells lit (no lingering trails, scan lines,
-    // grid rays, ember tints, etc.). Catches "the SHEDOS isn't fully
-    // solid at the end" regressions.
+    // Strict end-state: at progress=1.0 the canvas must equal the
+    // target exactly (every target cell at the right glyph, no
+    // non-target cells lit). Catches lingering trails and partial
+    // resolves.
     let registry = Registry::new();
     let logo = real_block_logo();
     let target_frame = target::build_target(50, 200, &logo, Color::WHITE);
@@ -167,8 +163,8 @@ fn at_scale_3_every_effect_completes_with_full_target() {
     let logo = small_logo();
     let target_frame = target::build_target(ROWS, COLS, &logo, Color::WHITE);
 
-    // Sanity: with this canvas + logo, auto_scale should pick at least 2
-    // (otherwise we're not actually exercising scaled rendering).
+    // Sanity: this canvas + logo should make auto_scale pick at
+    // least 2; otherwise we're not exercising scaled rendering.
     let scale = target::auto_scale(ROWS, COLS, &logo);
     assert!(scale >= 2, "expected auto-scale ≥ 2 at canvas {}×{} for logo {}×{}; got {}",
             ROWS, COLS, logo.rows, logo.cols, scale);

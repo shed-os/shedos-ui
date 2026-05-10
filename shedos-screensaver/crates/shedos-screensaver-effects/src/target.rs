@@ -1,12 +1,10 @@
 //! Helpers for rendering a Logo onto a Frame as the target state.
 //!
-//! The art is integer-scaled (cell replication) so SHEDOS fills the
-//! canvas — each lit cell of the logo becomes an N×N block of canvas
-//! cells, where N is the largest integer that keeps the rendered art
-//! within ~75% of the canvas. Solid-block variants (`block`, `mini`)
-//! scale crisply; line-drawing variants tile their glyphs (which
-//! still reads as a stylized "big" version of the letter, similar to
-//! a half-tone print).
+//! The art is integer-scaled (cell replication): each lit cell of
+//! the logo becomes an N×N block of canvas cells, where N is the
+//! largest integer that keeps the rendered art within ~75% of the
+//! canvas. Solid-block variants scale crisply; line-drawing variants
+//! tile their glyphs.
 
 use shedos_screensaver_core::{Cell, Color, Frame, Logo};
 
@@ -66,8 +64,8 @@ pub fn render_logo_scaled_centered(frame: &mut Frame, logo: &Logo, fg: Color, sc
     }
 }
 
-/// Paint `logo` onto `frame` centered, at scale=1 (no scaling).
-/// Kept as a thin alias for callers that want raw 1:1 rendering.
+/// Paint `logo` onto `frame` centered at scale=1. Alias for callers
+/// wanting raw 1:1 rendering.
 pub fn render_logo_centered(frame: &mut Frame, logo: &Logo, fg: Color) {
     render_logo_scaled_centered(frame, logo, fg, 1);
 }
@@ -80,8 +78,7 @@ pub fn build_target(rows: u16, cols: u16, logo: &Logo, fg: Color) -> Frame {
 }
 
 /// Build a fresh target Frame with an explicit scale factor (1 = no
-/// scaling, like the prior behavior). Useful for tests and for users
-/// who pass `--scale=N` to override the auto-fill heuristic.
+/// scaling). Useful for tests and `--scale=N` callers.
 pub fn build_target_with_scale(rows: u16, cols: u16, logo: &Logo, fg: Color, scale: u16) -> Frame {
     let mut f = Frame::new(rows, cols);
     render_logo_scaled_centered(&mut f, logo, fg, scale);
@@ -141,7 +138,7 @@ mod tests {
     #[test]
     fn auto_scale_picks_at_least_one() {
         let logo = shedos_logo();
-        // Canvas barely larger than logo — should still pick scale 1.
+        // Canvas barely larger than logo; scale stays 1.
         assert_eq!(auto_scale(6, 24, &logo), 1);
     }
 
@@ -174,8 +171,8 @@ mod tests {
         // Canvas big enough to comfortably fit scale=4 (= 20 rows × 92 cols).
         let mut f = Frame::new(40, 120);
         render_logo_scaled_centered(&mut f, &logo, Color::WHITE, 4);
-        // Verify nothing rendered outside (0..40, 0..120) — Frame::set
-        // already drops OOB writes, but check no panic + non-empty render.
+        // Verify nothing rendered outside (0..40, 0..120). Frame::set
+        // drops OOB writes; check no panic + non-empty render.
         let lit: usize = f.cells().filter(|(_, _, c)| c.ch != ' ').count();
         assert_eq!(lit, logo.lit_count() * 16); // 4*4 = 16
     }

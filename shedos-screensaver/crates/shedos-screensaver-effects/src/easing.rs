@@ -1,9 +1,9 @@
 //! Easing functions for effect animations.
 //!
 //! Each function takes `t: 0.0..=1.0` (normalized progress) and
-//! returns an eased value in the same range. Mirrors the standard
-//! Robert Penner easing set; effects pick one based on the feel
-//! they want (ease-out for "settling", ease-in for "accelerating").
+//! returns an eased value in the same range. Robert Penner easing
+//! set; effects pick by feel (ease-out for settling, ease-in for
+//! accelerating).
 
 #[inline]
 pub fn linear(t: f32) -> f32 {
