@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-# Internal cargo crate version — kept as semver because cargo rejects
+# Internal cargo crate version; kept as semver because cargo rejects
 # leading zeros (the CalVer "2026.04.25" used by the PKGBUILD trips
 # its parser on "04"). Bumped only on internal API changes; the user-
 # facing version comes from the PKGBUILD pkgver and is what pacman

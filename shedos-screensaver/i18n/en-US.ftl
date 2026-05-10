@@ -1,4 +1,4 @@
-## ShedOS animated screensavers — English (US) catalog.
+## ShedOS animated screensavers; English (US) catalog.
 ## Keys are referenced by t!() / I18n::t() in the Rust source;
 ## new keys here MUST also be added to en-US (this file) before
 ## any other locale, since this is the embedded fallback.
