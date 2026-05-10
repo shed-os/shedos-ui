@@ -1,8 +1,7 @@
 [Unit]
-# Started/stopped on demand by hypridle's listener hooks. NOT
-# auto-enabled at session start (no [Install]) — `WantedBy=` would
-# pull this up at login and immediately render an overlay over an
-# active session. The user's hypridle config triggers it instead.
+# Started by hypridle's listener hooks. No [Install] because
+# WantedBy= would pull this up at login and render an overlay over
+# an active session.
 Description=ShedOS animated screensaver
 After=graphical-session.target
 PartOf=graphical-session.target
@@ -10,12 +9,7 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/shedos-screensaver --mode=wayland --idle-daemon --hold 5
-# SIGUSR1 is the screensaver's own clean-exit signal; the binary's
-# signal handler flips a should_exit flag the render loop polls at
-# ~60 Hz, so a healthy SIGUSR1 path tears down sub-frame.
+# SIGUSR1 is the screensaver binary's clean-exit signal.
 KillSignal=SIGUSR1
-# If SIGUSR1 doesn't elicit exit within 5 s (panic, deadlock, lost
-# signal), systemd escalates to SIGKILL — the screensaver will never
-# survive past the on-resume hook regardless of the binary's state.
 TimeoutStopSec=5
 Restart=no
