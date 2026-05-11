@@ -50,7 +50,7 @@ pub fn paint_widgets(
     let red_color = rgb(theme.red);
 
     let now = chrono::Local::now();
-    let clock = now.format("%H:%M").to_string();
+    let clock = now.format("%-I:%M %p").to_string();
     let date = now.format("%A, %B %-d").to_string();
 
     // Clock at ~30% from the top of the rect.
