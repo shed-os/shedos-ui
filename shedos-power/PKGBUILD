@@ -1,0 +1,57 @@
+# Maintainer: ShedOS <https://github.com/theshedman/shedos>
+#
+# Fullscreen overlay the Waybar power glyph opens. Same renderer
+# family as shedos-greeter; uses wlr-layer-shell for the overlay
+# surface and shedos-prompt-ui for font + primitives.
+
+pkgname=shedos-power
+pkgver=2026.05.11
+pkgrel=1
+pkgdesc='ShedOS power-menu overlay'
+arch=('x86_64')
+url='https://github.com/theshedman/shedos'
+license=('GPL-3.0-or-later')
+
+depends=(
+    'gcc-libs'
+    'glibc'
+    'wayland'
+    'libxkbcommon'
+    'ttf-jetbrains-mono-nerd'
+    'shedos-system'
+)
+
+makedepends=(
+    'rust>=1.75'
+    'cargo'
+    'scdoc'
+)
+
+prepare() {
+    cd "$startdir"
+    install -d man/build
+    for src in man/*.scd; do
+        out=man/build/$(basename "${src%.scd}")
+        scdoc < "$src" > "$out"
+    done
+}
+
+build() {
+    cd "$startdir"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$startdir"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$startdir"
+
+    install -Dm755 target/release/shedos-power \
+        "$pkgdir/usr/bin/shedos-power"
+
+    install -Dm644 man/build/shedos-power.1 \
+        "$pkgdir/usr/share/man/man1/shedos-power.1"
+}
