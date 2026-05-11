@@ -5,6 +5,10 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
+# Clear hypridle's idle-dim shader before the lock surface renders;
+# without this the screensaver and prompt sit behind the dim until
+# user input fires hypridle's on-resume.
+ExecStartPre=-/usr/bin/hyprshade off
 ExecStart=/usr/bin/shedos-screensaver --mode=lock
 Restart=on-failure
 RestartSec=5
