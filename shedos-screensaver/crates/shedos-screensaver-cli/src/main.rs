@@ -680,8 +680,12 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
 fn build_fingerprint_config(username: &str) -> Option<FingerprintConfig> {
     let info = auth::fingerprint_available(username)?;
     let (ping, ping_source) = calloop_ping::make_ping().ok()?;
-    let (rx, _handle) =
-        auth::spawn_fingerprint_auth_loop(username.to_owned(), ping);
+    let paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (rx, _handle) = auth::spawn_fingerprint_auth_loop(
+        username.to_owned(),
+        ping,
+        paused.clone(),
+    );
     let hint_text = if info.finger_count == 1 {
         "Touch fingerprint sensor or type password".to_string()
     } else {
@@ -694,6 +698,7 @@ fn build_fingerprint_config(username: &str) -> Option<FingerprintConfig> {
         rx,
         ping_source,
         hint_text,
+        paused,
     })
 }
 

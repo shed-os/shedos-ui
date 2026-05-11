@@ -161,6 +161,7 @@ impl WaylandRenderer {
             error: None,
             fingerprint_rx: None,
             fingerprint_hint: None,
+            fingerprint_paused: None,
             fingerprint_status: FingerprintStatus::Idle,
         };
         let _ = config.fps_cap;
@@ -216,11 +217,16 @@ impl WaylandRenderer {
             username,
             fingerprint,
         } = lock_config;
-        let (fingerprint_rx, fingerprint_ping_source, fingerprint_hint) = match fingerprint
-        {
-            Some(fp) => (Some(fp.rx), Some(fp.ping_source), Some(fp.hint_text)),
-            None => (None, None, None),
-        };
+        let (fingerprint_rx, fingerprint_ping_source, fingerprint_hint, fingerprint_paused) =
+            match fingerprint {
+                Some(fp) => (
+                    Some(fp.rx),
+                    Some(fp.ping_source),
+                    Some(fp.hint_text),
+                    Some(fp.paused),
+                ),
+                None => (None, None, None, None),
+            };
 
         let now = Instant::now();
         let lock_state = LockState::new(state_config, now);
@@ -260,6 +266,7 @@ impl WaylandRenderer {
             error: None,
             fingerprint_rx,
             fingerprint_hint,
+            fingerprint_paused,
             fingerprint_status: FingerprintStatus::Idle,
         };
         let _ = config.fps_cap;
@@ -294,6 +301,12 @@ impl WaylandRenderer {
                 "shedos-screensaver: zwlr_output_power_manager_v1 not advertised; \
                  monitors will not power off"
             );
+        }
+
+        if let (Some(paused), Some(ls)) =
+            (state.fingerprint_paused.as_ref(), state.lock_state.as_ref())
+        {
+            paused.store(ls.phase() != LockPhase::Prompt, Ordering::Release);
         }
 
         let manager: ExtSessionLockManagerV1 = bind_session_lock_manager(&globals, &qh)?;
@@ -552,6 +565,7 @@ pub(crate) struct AppState {
     error: Option<(Instant, String)>,
     fingerprint_rx: Option<Receiver<Result<(), ()>>>,
     fingerprint_hint: Option<String>,
+    fingerprint_paused: Option<Arc<AtomicBool>>,
     fingerprint_status: FingerprintStatus,
 }
 
@@ -601,6 +615,9 @@ impl AppState {
                     p.set_mode(DpmsMode::On);
                 }
             }
+        }
+        if let Some(paused) = self.fingerprint_paused.as_ref() {
+            paused.store(to != LockPhase::Prompt, Ordering::Release);
         }
         match to {
             LockPhase::Screensaver => {

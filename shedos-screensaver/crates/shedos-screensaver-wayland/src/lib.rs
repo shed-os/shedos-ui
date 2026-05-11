@@ -54,6 +54,9 @@ pub struct FingerprintConfig {
     pub rx: Receiver<Result<(), ()>>,
     pub ping_source: calloop_ping::PingSource,
     pub hint_text: String,
+    /// When `true`, the auth thread idles instead of calling
+    /// `pam_authenticate`. Set on entry to / exit from `LockPhase::Prompt`.
+    pub paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Configuration handed to [`WaylandRenderer::run`].

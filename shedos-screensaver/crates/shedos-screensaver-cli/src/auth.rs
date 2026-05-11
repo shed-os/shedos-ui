@@ -5,7 +5,9 @@ use pam::{Client, Conversation, PamReturnCode};
 use shedos_screensaver_wayland::calloop_ping::Ping;
 use std::ffi::{CStr, CString};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -141,11 +143,16 @@ pub fn fingerprint_available(username: &str) -> Option<FingerprintInfo> {
 pub fn spawn_fingerprint_auth_loop(
     username: String,
     ping: Ping,
+    paused: Arc<AtomicBool>,
 ) -> (Receiver<std::result::Result<(), ()>>, JoinHandle<()>) {
     let (tx, rx) = channel::<std::result::Result<(), ()>>();
     let handle = thread::Builder::new()
         .name("shedos-fp-auth".into())
         .spawn(move || loop {
+            if paused.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
             let conv = FingerprintConv {
                 username: username.clone(),
                 tx: tx.clone(),
