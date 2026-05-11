@@ -50,6 +50,17 @@ impl FontFace {
         w.ceil() as i32
     }
 
+    /// Glyph bbox metrics for a single character. Returns `(xmin,
+    /// ymin, width, height)` matching fontdue's conventions: with
+    /// pen at (x0, y0), the bitmap occupies columns
+    /// `[x0 + xmin, x0 + xmin + width)` and rows
+    /// `[y0 - ymin - height, y0 - ymin)`. Used to center icon glyphs
+    /// against a target visual centre rather than the advance width.
+    pub fn glyph_bbox(&self, ch: char, px: f32) -> (i32, i32, u32, u32) {
+        let (m, _) = self.font.rasterize(ch, px);
+        (m.xmin, m.ymin, m.width as u32, m.height as u32)
+    }
+
     /// Composite `text` onto `canvas` at baseline (`x`, `y`). `color`
     /// is sRGB (R, G, B); `alpha` (0..=255) combines with fontdue's
     /// per-glyph alpha. Canvas is wl_shm Argb8888 (BGRA on LE).

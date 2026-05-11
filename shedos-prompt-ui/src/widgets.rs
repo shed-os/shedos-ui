@@ -1,11 +1,15 @@
 //! Composed widgets onto an Argb8888 canvas: clock, date, prompt
 //! input, greeting/error line, ShedOS branding. Stateless.
 
+use crate::power;
 use crate::primitives::{draw_fingerprint_icon, draw_rounded_box};
 use crate::FingerprintRender;
 use crate::text::FontFace;
 use crate::theme::Theme;
 use crate::{OutputRect, PromptState};
+
+const POWER_GLYPH: char = '\u{F011}';
+const RESTART_GLYPH: char = '\u{F021}';
 
 const CLOCK_PX: f32 = 120.0;
 const DATE_PX: f32 = 24.0;
@@ -149,10 +153,6 @@ pub fn paint_widgets(
         );
     }
 
-    // Brand wordmark near bottom of the rect. Target width scales
-    // with the output so it stays visually comparable across 1080p
-    // / 4K / portrait outputs without becoming oversized on small
-    // screens or thumbnail-sized on large ones.
     let wordmark_target_w = (pw / 3).clamp(360, 900) as u32;
     let center_x = px + pw / 2;
     let center_y = py + (ph as f32 * 0.85) as i32;
@@ -164,4 +164,137 @@ pub fn paint_widgets(
         center_y,
         wordmark_target_w,
     );
+
+    paint_power_menu(
+        canvas, canvas_w, canvas_h, output_rect, &state.power_menu,
+        regular, bold, theme,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_power_menu(
+    canvas: &mut [u8],
+    canvas_w: u32,
+    canvas_h: u32,
+    rect: &OutputRect,
+    state: &crate::PowerMenuState,
+    regular: &FontFace,
+    bold: &FontFace,
+    theme: &Theme,
+) {
+    let text_color = rgb(theme.text);
+    let base_color = rgb(theme.base);
+    let accent_color = rgb(theme.accent);
+
+    let (cx, cy) = power::button_center(rect);
+    let btn_x = cx - power::BTN_SIZE / 2;
+    let btn_y = cy - power::BTN_SIZE / 2;
+    let btn_size = power::BTN_SIZE as u32;
+
+    let (fill_alpha, border_alpha) = if state.open {
+        (0xee, 0xff)
+    } else {
+        (0xb0, 0xcc)
+    };
+    draw_rounded_box(
+        canvas, canvas_w, canvas_h, btn_x, btn_y,
+        btn_size, btn_size, btn_size / 2, 2,
+        base_color, fill_alpha,
+        accent_color, border_alpha,
+    );
+
+    let glyph_str = POWER_GLYPH.to_string();
+    let (xmin, ymin, w_px, h_px) = regular.glyph_bbox(POWER_GLYPH, power::GLYPH_PX);
+    let glyph_x = cx - xmin - (w_px as i32) / 2;
+    let glyph_baseline = cy + ymin + (h_px as i32) / 2;
+    regular.render(
+        &glyph_str, power::GLYPH_PX, glyph_x, glyph_baseline,
+        accent_color, 0xff, canvas, canvas_w, canvas_h,
+    );
+
+    if !state.open {
+        return;
+    }
+
+    let items = crate::PowerAction::all();
+    if items.is_empty() {
+        return;
+    }
+    let (mx, my) = power::menu_origin(rect);
+    let menu_w = power::MENU_W;
+    let menu_h = (power::ITEM_H * items.len() as i32) as u32;
+
+    draw_rounded_box(
+        canvas, canvas_w, canvas_h, mx, my,
+        menu_w, menu_h, power::MENU_RADIUS, 1,
+        base_color, 0xee,
+        accent_color, 0xcc,
+    );
+
+    let pointer_row = state.pointer.and_then(|(px, py)| {
+        if px < mx as f32 || px >= (mx + menu_w as i32) as f32 {
+            return None;
+        }
+        let local_y = py - my as f32;
+        if local_y < 0.0 {
+            return None;
+        }
+        let idx = (local_y / power::ITEM_H as f32) as i32;
+        if idx >= 0 && (idx as usize) < items.len() {
+            Some(idx as usize)
+        } else {
+            None
+        }
+    });
+
+    let icon_px = power::LABEL_PX;
+    for (i, action) in items.iter().enumerate() {
+        let row_y = my + (i as i32) * power::ITEM_H;
+        let highlighted = pointer_row == Some(i)
+            || (state.kb_active && state.selected == i);
+        if highlighted {
+            draw_rounded_box(
+                canvas, canvas_w, canvas_h,
+                mx + 4, row_y + 2,
+                menu_w - 8, (power::ITEM_H - 4) as u32,
+                6, 0,
+                accent_color, 0x33,
+                accent_color, 0x00,
+            );
+        }
+        let label = action.label();
+        let face: &FontFace = if highlighted { bold } else { regular };
+        let label_color = if highlighted { accent_color } else { text_color };
+
+        let row_cy = row_y + power::ITEM_H / 2;
+
+        let icon_ch = menu_icon_for(*action);
+        let icon_str = icon_ch.to_string();
+        let icon_w = regular.measure_width(&icon_str, icon_px);
+        let (_ixmin, icon_ymin, _iw_px, icon_h) = regular.glyph_bbox(icon_ch, icon_px);
+        let icon_x = mx + 14;
+        let icon_baseline = row_cy + icon_ymin + (icon_h as i32) / 2;
+        regular.render(
+            &icon_str, icon_px, icon_x, icon_baseline,
+            label_color, 0xff, canvas, canvas_w, canvas_h,
+        );
+
+        let label_x = icon_x + icon_w + 12;
+        if let Some(first_ch) = label.chars().next() {
+            let (_lxmin, l_ymin, _lw_px, l_h) = face.glyph_bbox(first_ch, power::LABEL_PX);
+            let label_baseline = row_cy + l_ymin + (l_h as i32) / 2;
+            face.render(
+                label, power::LABEL_PX, label_x, label_baseline,
+                label_color, 0xff, canvas, canvas_w, canvas_h,
+            );
+        }
+    }
+}
+
+fn menu_icon_for(action: crate::PowerAction) -> char {
+    use crate::PowerAction::*;
+    match action {
+        Restart => RESTART_GLYPH,
+        Shutdown => POWER_GLYPH,
+    }
 }

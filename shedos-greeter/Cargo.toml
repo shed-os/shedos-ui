@@ -15,6 +15,7 @@ path = "src/main.rs"
 shedos-prompt-ui = { path = "../shedos-prompt-ui" }
 smithay-client-toolkit = "0.19"
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 greetd_ipc = { version = "0.10", features = ["sync-codec"] }
 anyhow = "1"
 log = "0.4"

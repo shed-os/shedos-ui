@@ -156,6 +156,13 @@ match before unlock.
 
 Per-user fingerprint enrollment happens via *shedman-fingerprint*(1).
 
+A power glyph in the top-right corner opens a dropdown with
+*Restart* and *Shut down*. Toggle with the mouse or *F12*;
+*Up*/*Down* select an item and *Enter* runs it. Both actions go
+through *systemctl reboot*/*poweroff* (which routes through logind);
+the ext-session-lock surface stays active until the kernel takes
+over, so the lock never releases on its own.
+
 The 46 ship effects. Run *shedos-screensaver --list* for the live
 catalog with durations.
 

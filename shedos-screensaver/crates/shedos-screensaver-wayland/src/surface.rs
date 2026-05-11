@@ -19,7 +19,10 @@ use crate::{
     blend_over, pack_argb, AuthFn, FrameProducer, LockConfig, WaylandConfig,
 };
 use std::sync::mpsc::Receiver;
-use shedos_prompt_ui::{OutputRect, PromptState, RenderParams, Theme, WidgetCache};
+use shedos_prompt_ui::{
+    power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
+    OutputRect, PromptState, RenderParams, Theme, WidgetCache,
+};
 use shedos_screensaver_core::{Color, Frame, LockPhase, LockState};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -34,7 +37,7 @@ use smithay_client_toolkit::{
     registry_handlers,
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
-        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
     shell::{
@@ -81,6 +84,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1::ExtSessionLockManagerV1,
     ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
 };
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
+    Shape as CursorShape, WpCursorShapeDeviceV1,
+};
 use wayland_protocols_wlr::output_power_management::v1::client::{
     zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1,
     zwlr_output_power_v1::{Mode as DpmsMode, ZwlrOutputPowerV1},
@@ -115,6 +121,7 @@ impl WaylandRenderer {
             .map_err(|e| WaylandError::Bind(format!("wlr-layer-shell-unstable-v1: {e}")))?;
         let shm = Shm::bind(&globals, &qh)
             .map_err(|e| WaylandError::Bind(format!("wl_shm: {e}")))?;
+        let cursor_shape = CursorShapeManager::bind(&globals, &qh).ok();
 
         let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
             .map_err(|e| WaylandError::Font(format!("{e}")))?;
@@ -127,8 +134,10 @@ impl WaylandRenderer {
             compositor_state,
             layer_shell,
             qh: qh.clone(),
-            keyboard: None,
+            cursor_device: None,
+            cursor_shape,
             pointer: None,
+            keyboard: None,
             should_exit: Arc::clone(&should_exit),
             input_dismissed: false,
             idle_daemon: config.idle_daemon,
@@ -148,6 +157,7 @@ impl WaylandRenderer {
             username: None,
             prompt_password: String::new(),
             prompt_capslock: false,
+            power_menu: PowerMenuState::default(),
             error: None,
             fingerprint_rx: None,
             fingerprint_hint: None,
@@ -192,6 +202,7 @@ impl WaylandRenderer {
             .map_err(|e| WaylandError::Bind(format!("wlr-layer-shell-unstable-v1: {e}")))?;
         let shm = Shm::bind(&globals, &qh)
             .map_err(|e| WaylandError::Bind(format!("wl_shm: {e}")))?;
+        let cursor_shape = CursorShapeManager::bind(&globals, &qh).ok();
 
         let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
             .map_err(|e| WaylandError::Font(format!("{e}")))?;
@@ -222,8 +233,10 @@ impl WaylandRenderer {
             compositor_state,
             layer_shell,
             qh: qh.clone(),
-            keyboard: None,
+            cursor_device: None,
+            cursor_shape,
             pointer: None,
+            keyboard: None,
             should_exit: Arc::clone(&should_exit),
             input_dismissed: false,
             idle_daemon: config.idle_daemon,
@@ -243,6 +256,7 @@ impl WaylandRenderer {
             username: Some(username),
             prompt_password: String::new(),
             prompt_capslock: false,
+            power_menu: PowerMenuState::default(),
             error: None,
             fingerprint_rx,
             fingerprint_hint,
@@ -497,8 +511,12 @@ pub(crate) struct AppState {
     compositor_state: CompositorState,
     layer_shell: LayerShell,
     qh: QueueHandle<Self>,
-    keyboard: Option<WlKeyboard>,
+    /// `cursor_device` is a child of `pointer` (via cursor-shape-v1) and
+    /// must drop before it; field declaration order = drop order.
+    cursor_device: Option<WpCursorShapeDeviceV1>,
+    cursor_shape: Option<CursorShapeManager>,
     pointer: Option<WlPointer>,
+    keyboard: Option<WlKeyboard>,
     should_exit: Arc<AtomicBool>,
     input_dismissed: bool,
     idle_daemon: bool,
@@ -518,6 +536,7 @@ pub(crate) struct AppState {
     username: Option<String>,
     prompt_password: String,
     prompt_capslock: bool,
+    power_menu: PowerMenuState,
     error: Option<(Instant, String)>,
     fingerprint_rx: Option<Receiver<Result<(), ()>>>,
     fingerprint_hint: Option<String>,
@@ -819,6 +838,7 @@ impl AppState {
             fail: active_error.is_some(),
             success: false,
             capslock: self.prompt_capslock,
+            power_menu: self.power_menu.clone(),
         };
         let greeting = self
             .username
@@ -1100,6 +1120,7 @@ impl SeatHandler for AppState {
             }
         }
         if capability == Capability::Pointer {
+            self.cursor_device = None;
             if let Some(p) = self.pointer.take() {
                 p.release();
             }
@@ -1153,6 +1174,47 @@ impl KeyboardHandler for AppState {
             self.on_phase_change(from, to);
         }
 
+        if self.power_menu.open {
+            match event.keysym {
+                Keysym::Escape | Keysym::F12 => {
+                    self.power_menu.open = false;
+                    self.power_menu.kb_active = false;
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Up => {
+                    self.power_menu.kb_active = true;
+                    self.power_menu.select_prev();
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Down => {
+                    self.power_menu.kb_active = true;
+                    self.power_menu.select_next();
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Return | Keysym::KP_Enter => {
+                    self.power_menu.kb_active = true;
+                    if let Some(action) = self.power_menu.current() {
+                        self.power_menu.open = false;
+                        self.power_menu.kb_active = false;
+                        self.mark_all_dirty();
+                        dispatch_power_lock(action);
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if event.keysym == Keysym::F12 {
+            self.power_menu.open = true;
+            self.power_menu.kb_active = true;
+            self.power_menu.clamp_selection();
+            self.mark_all_dirty();
+            return;
+        }
+
         match event.keysym {
             Keysym::Return | Keysym::KP_Enter => self.submit_password(),
             Keysym::BackSpace => {
@@ -1201,22 +1263,161 @@ impl PointerHandler for AppState {
     fn pointer_frame(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _pointer: &WlPointer,
+        qh: &QueueHandle<Self>,
+        pointer: &WlPointer,
         events: &[PointerEvent],
     ) {
-        if self.is_lock_mode {
+        for e in events {
+            if let PointerEventKind::Enter { serial } = e.kind {
+                if self.cursor_device.is_none() {
+                    if let Some(mgr) = self.cursor_shape.as_ref() {
+                        self.cursor_device = Some(mgr.get_shape_device(pointer, qh));
+                    }
+                }
+                if let Some(dev) = self.cursor_device.as_ref() {
+                    dev.set_shape(serial, CursorShape::Default);
+                }
+            }
+        }
+
+        if !self.is_lock_mode {
+            for e in events {
+                match e.kind {
+                    PointerEventKind::Press { .. }
+                    | PointerEventKind::Release { .. }
+                    | PointerEventKind::Axis { .. } => self.handle_input(),
+                    _ => {}
+                }
+            }
             return;
         }
+
+        let mut dirty = false;
+        let mut press_at: Option<(usize, f32, f32)> = None;
         for e in events {
+            let surface_idx = self
+                .surfaces
+                .iter()
+                .position(|s| s.shell.wl_surface() == &e.surface);
             match e.kind {
-                PointerEventKind::Press { .. }
-                | PointerEventKind::Release { .. }
-                | PointerEventKind::Axis { .. } => self.handle_input(),
+                PointerEventKind::Enter { .. } => {
+                    if surface_idx.is_some() {
+                        self.power_menu.pointer =
+                            Some((e.position.0 as f32, e.position.1 as f32));
+                        if self.power_menu.open {
+                            dirty = true;
+                        }
+                    }
+                }
+                PointerEventKind::Motion { .. } => {
+                    if let Some(idx) = surface_idx {
+                        let new_x = e.position.0 as f32;
+                        let new_y = e.position.1 as f32;
+                        let rect = OutputRect {
+                            x: 0,
+                            y: 0,
+                            w: self.surfaces[idx].width as i32,
+                            h: self.surfaces[idx].height as i32,
+                        };
+                        if self.power_menu.open {
+                            let old_hit = self.power_menu.pointer.map(|(ox, oy)| {
+                                power_ui::hit_test(&self.power_menu, &[rect], ox, oy)
+                            });
+                            let new_hit =
+                                power_ui::hit_test(&self.power_menu, &[rect], new_x, new_y);
+                            if old_hit != Some(new_hit) {
+                                dirty = true;
+                            }
+                        }
+                        self.power_menu.pointer = Some((new_x, new_y));
+                    }
+                }
+                PointerEventKind::Leave { .. } => {
+                    let was_open = self.power_menu.open;
+                    self.power_menu.pointer = None;
+                    if was_open {
+                        dirty = true;
+                    }
+                }
+                PointerEventKind::Press { button, .. } if button == 0x110 => {
+                    if let Some(idx) = surface_idx {
+                        press_at = Some((idx, e.position.0 as f32, e.position.1 as f32));
+                    }
+                }
                 _ => {}
             }
         }
+
+        if let Some((idx, cx, cy)) = press_at {
+            // Wake the prompt first; only after the surface is visible
+            // does the hit-test make sense.
+            let transition = self.lock_state.as_mut().and_then(|ls| {
+                let prev = ls.phase();
+                ls.on_input(Instant::now());
+                let curr = ls.phase();
+                (prev != curr).then_some((prev, curr))
+            });
+            if let Some((from, to)) = transition {
+                self.on_phase_change(from, to);
+            }
+
+            let rect = OutputRect {
+                x: 0,
+                y: 0,
+                w: self.surfaces[idx].width as i32,
+                h: self.surfaces[idx].height as i32,
+            };
+            match power_ui::hit_test(&self.power_menu, &[rect], cx, cy) {
+                PowerHit::ToggleButton => {
+                    self.power_menu.open = !self.power_menu.open;
+                    self.power_menu.kb_active = false;
+                    self.power_menu.clamp_selection();
+                    dirty = true;
+                }
+                PowerHit::Item(action) => {
+                    self.power_menu.open = false;
+                    self.power_menu.kb_active = false;
+                    dirty = true;
+                    dispatch_power_lock(action);
+                }
+                PowerHit::None => {
+                    if self.power_menu.open {
+                        self.power_menu.open = false;
+                        self.power_menu.kb_active = false;
+                        dirty = true;
+                    }
+                }
+            }
+        }
+
+        if dirty {
+            self.mark_all_dirty();
+        }
     }
+}
+
+fn dispatch_power_lock(action: PowerAction) {
+    let verb = match action {
+        PowerAction::Restart => "reboot",
+        PowerAction::Shutdown => "poweroff",
+    };
+    eprintln!("shedos-screensaver-wayland: dispatch_power_lock: {:?} (systemctl {})", action, verb);
+    std::thread::spawn(move || {
+        let out = std::process::Command::new("systemctl").arg(verb).output();
+        match out {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => eprintln!(
+                "shedos-screensaver-wayland: systemctl {}: status={} stderr={:?}",
+                verb,
+                o.status,
+                String::from_utf8_lossy(&o.stderr).trim()
+            ),
+            Err(e) => eprintln!(
+                "shedos-screensaver-wayland: systemctl {} spawn failed: {e}",
+                verb
+            ),
+        }
+    });
 }
 
 impl LayerShellHandler for AppState {

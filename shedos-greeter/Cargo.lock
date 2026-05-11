@@ -788,6 +788,7 @@ dependencies = [
  "shedos-prompt-ui",
  "smithay-client-toolkit",
  "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

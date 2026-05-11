@@ -10,6 +10,7 @@
 
 use anyhow::Result;
 
+pub mod power;
 pub mod primitives;
 pub mod text;
 pub mod theme;
@@ -18,6 +19,7 @@ pub mod watch;
 pub mod widgets;
 pub mod wordmark;
 
+pub use power::{PowerAction, PowerHit, PowerMenuState};
 pub use theme::Theme;
 
 use text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
@@ -32,6 +34,7 @@ pub struct PromptState {
     pub fail: bool,
     pub success: bool,
     pub capslock: bool,
+    pub power_menu: PowerMenuState,
 }
 
 /// Logical rect (in canvas-local pixels) where one output sits. Used

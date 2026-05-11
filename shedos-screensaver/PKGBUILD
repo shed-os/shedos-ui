@@ -21,6 +21,7 @@ depends=(
     'wayland'               # libwayland-client.so.0 (Wayland renderer)
     'libxkbcommon'          # crossterm + smithay keyboard handling
     'ttf-dejavu'            # default DejaVu Sans Mono for the Wayland font atlas
+    'ttf-jetbrains-mono-nerd' # shedos-prompt-ui clock + power glyph font (lock prompt)
     'alsa-lib'              # cpal -> ALSA -> pipewire-alsa loopback (audio capture)
     'pam'                   # libpam for --mode=lock authentication
     'fprintd'               # pam_fprintd.so for fingerprint unlock at the lock screen

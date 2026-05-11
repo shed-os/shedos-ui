@@ -59,4 +59,9 @@ package() {
 
     install -Dm644 man/build/shedos-greeter.1 \
         "$pkgdir/usr/share/man/man1/shedos-greeter.1"
+
+    # Polkit rule that grants the greetd `greeter` user permission to
+    # reboot / power off from the login screen's power dropdown.
+    install -Dm644 tree/usr/share/polkit-1/rules.d/49-shedos-greeter-power.rules \
+        "$pkgdir/usr/share/polkit-1/rules.d/49-shedos-greeter-power.rules"
 }

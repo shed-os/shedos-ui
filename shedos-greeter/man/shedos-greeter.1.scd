@@ -31,6 +31,12 @@ _/etc/shedos/themes/current/_; the greeter listens for atomic theme
 swaps via inotify and picks up new colors / wallpaper on the next
 frame, without restart.
 
+A small power glyph in the top-right corner opens a dropdown with
+*Restart* and *Shut down*. Toggle with the mouse or with *F12*;
+*Up*/*Down* select an item and *Enter* runs it. Actions go through
+*systemctl*(1) → logind and are permitted by a polkit rule shipped
+in this package; the greeter has no user session to log out from.
+
 # ENVIRONMENT
 
 *GREETD_SOCK*

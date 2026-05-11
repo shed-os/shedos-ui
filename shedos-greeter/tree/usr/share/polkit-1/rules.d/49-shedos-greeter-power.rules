@@ -1,0 +1,21 @@
+// Allow the greetd `greeter` user to reboot and power off from the
+// login screen's power dropdown. Without this rule logind denies the
+// call because the greeter has no active session of its own and
+// can't satisfy logind's "active session required" check.
+//
+// Scope: only `greeter`, only the power-off / reboot action ids.
+// Lock-screen power actions go through the user's own active session
+// and don't need this rule.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "greeter") {
+        return;
+    }
+    if (action.id === "org.freedesktop.login1.power-off" ||
+        action.id === "org.freedesktop.login1.power-off-multiple-sessions" ||
+        action.id === "org.freedesktop.login1.power-off-ignore-inhibit" ||
+        action.id === "org.freedesktop.login1.reboot" ||
+        action.id === "org.freedesktop.login1.reboot-multiple-sessions" ||
+        action.id === "org.freedesktop.login1.reboot-ignore-inhibit") {
+        return polkit.Result.YES;
+    }
+});

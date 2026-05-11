@@ -13,17 +13,20 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use shedos_prompt_ui::{
-    self as prompt_ui, watch, OutputRect, PromptState, RenderParams, Theme, WidgetCache,
+    self as prompt_ui,
+    power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
+    watch, OutputRect, PromptState, RenderParams, Theme, WidgetCache,
 };
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_output, delegate_registry, delegate_seat,
-    delegate_shm, delegate_xdg_shell, delegate_xdg_window,
+    delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry,
+    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
+        pointer::{cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
     shell::{
@@ -37,8 +40,14 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::registry_queue_init,
-    protocol::{wl_keyboard::WlKeyboard, wl_output, wl_seat::WlSeat, wl_shm, wl_surface::WlSurface},
+    protocol::{
+        wl_keyboard::WlKeyboard, wl_output, wl_pointer::WlPointer, wl_seat::WlSeat, wl_shm,
+        wl_surface::WlSurface,
+    },
     Connection, QueueHandle,
+};
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1::{Shape as CursorShape, WpCursorShapeDeviceV1},
 };
 
 use crate::greetd;
@@ -70,6 +79,13 @@ pub fn run() -> Result<()> {
     let xdg_shell = XdgShell::bind(&globals, &qh)
         .context("xdg_wm_base not advertised by compositor")?;
     let shm = Shm::bind(&globals, &qh).context("wl_shm not advertised")?;
+    let cursor_shape = match CursorShapeManager::bind(&globals, &qh) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            log::warn!("cursor-shape-v1 not advertised: {e}; cursor will be hidden");
+            None
+        }
+    };
 
     // xdg-shell because cage (the kiosk compositor) advertises
     // xdg_wm_base but not zwlr_layer_shell_v1. cage forces fullscreen
@@ -113,12 +129,16 @@ pub fn run() -> Result<()> {
         pool,
         theme,
         cache,
+        cursor_device: None,
+        cursor_shape,
+        pointer: None,
         keyboard: None,
         size: None,
         outputs: Vec::new(),
         username,
         password: String::new(),
         capslock: false,
+        power_menu: PowerMenuState::default(),
         error_text: String::new(),
         error_until: None,
         theme_dirty,
@@ -142,6 +162,12 @@ struct App {
     pool: SlotPool,
     theme: Theme,
     cache: WidgetCache,
+    /// Drops before `pointer` (declaration order = drop order) so the
+    /// cursor-shape device's destroy never lands on an already-dead
+    /// wl_pointer.
+    cursor_device: Option<WpCursorShapeDeviceV1>,
+    cursor_shape: Option<CursorShapeManager>,
+    pointer: Option<WlPointer>,
     keyboard: Option<WlKeyboard>,
     size: Option<(u32, u32)>,
     /// One rect per `wl_output`, in canvas-local pixels (cage's
@@ -151,6 +177,7 @@ struct App {
     username: Option<String>,
     password: String,
     capslock: bool,
+    power_menu: PowerMenuState,
     /// Error message rendered below the input box during the
     /// `error_until` hold. Populated by `submit()` with the greetd
     /// error so PAM rejection reasons surface inline.
@@ -254,6 +281,7 @@ impl App {
             fail: error_active,
             success: false,
             capslock: self.capslock,
+            power_menu: self.power_menu.clone(),
         };
 
         let stride = (w * 4) as i32;
@@ -330,6 +358,12 @@ impl SeatHandler for App {
                 Err(e) => log::warn!("get_keyboard: {}", e),
             }
         }
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            match self.seat_state.get_pointer(qh, &seat) {
+                Ok(p) => self.pointer = Some(p),
+                Err(e) => log::warn!("get_pointer: {}", e),
+            }
+        }
     }
     fn remove_capability(
         &mut self,
@@ -341,6 +375,12 @@ impl SeatHandler for App {
         if capability == Capability::Keyboard {
             if let Some(kb) = self.keyboard.take() {
                 kb.release();
+            }
+        }
+        if capability == Capability::Pointer {
+            self.cursor_device = None;
+            if let Some(p) = self.pointer.take() {
+                p.release();
             }
         }
     }
@@ -369,7 +409,51 @@ impl KeyboardHandler for App {
         _: u32,
         event: KeyEvent,
     ) {
+        if self.power_menu.open {
+            match event.keysym {
+                Keysym::Escape => {
+                    self.power_menu.open = false;
+                    self.power_menu.kb_active = false;
+                    self.draw();
+                    return;
+                }
+                Keysym::Up => {
+                    self.power_menu.kb_active = true;
+                    self.power_menu.select_prev();
+                    self.draw();
+                    return;
+                }
+                Keysym::Down => {
+                    self.power_menu.kb_active = true;
+                    self.power_menu.select_next();
+                    self.draw();
+                    return;
+                }
+                Keysym::Return | Keysym::KP_Enter => {
+                    self.power_menu.kb_active = true;
+                    if let Some(action) = self.power_menu.current() {
+                        self.power_menu.open = false;
+                        self.power_menu.kb_active = false;
+                        dispatch_power(action);
+                    }
+                    self.draw();
+                    return;
+                }
+                Keysym::F12 => {
+                    self.power_menu.open = false;
+                    self.power_menu.kb_active = false;
+                    self.draw();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match event.keysym {
+            Keysym::F12 => {
+                self.power_menu.open = true;
+                self.power_menu.kb_active = true;
+                self.power_menu.clamp_selection();
+            }
             Keysym::Escape => {
                 log::info!("Escape pressed; exiting");
                 self.exit = true;
@@ -483,9 +567,115 @@ impl ProvidesRegistryState for App {
     }
 }
 
+impl PointerHandler for App {
+    fn pointer_frame(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        pointer: &WlPointer,
+        events: &[PointerEvent],
+    ) {
+        let mut dirty = false;
+        let mut clicked_at: Option<(f32, f32)> = None;
+        for e in events {
+            match e.kind {
+                PointerEventKind::Enter { serial } => {
+                    if self.cursor_device.is_none() {
+                        if let Some(mgr) = self.cursor_shape.as_ref() {
+                            self.cursor_device = Some(mgr.get_shape_device(pointer, qh));
+                        }
+                    }
+                    if let Some(dev) = self.cursor_device.as_ref() {
+                        dev.set_shape(serial, CursorShape::Default);
+                    }
+                    self.power_menu.pointer =
+                        Some((e.position.0 as f32, e.position.1 as f32));
+                    if self.power_menu.open {
+                        dirty = true;
+                    }
+                }
+                PointerEventKind::Motion { .. } => {
+                    let new_x = e.position.0 as f32;
+                    let new_y = e.position.1 as f32;
+                    if self.power_menu.open {
+                        let old_hit = self.power_menu.pointer.map(|(ox, oy)| {
+                            power_ui::hit_test(&self.power_menu, &self.outputs, ox, oy)
+                        });
+                        let new_hit =
+                            power_ui::hit_test(&self.power_menu, &self.outputs, new_x, new_y);
+                        if old_hit != Some(new_hit) {
+                            dirty = true;
+                        }
+                    }
+                    self.power_menu.pointer = Some((new_x, new_y));
+                }
+                PointerEventKind::Leave { .. } => {
+                    let was_open = self.power_menu.open;
+                    self.power_menu.pointer = None;
+                    if was_open {
+                        dirty = true;
+                    }
+                }
+                PointerEventKind::Press { button, .. } if button == 0x110 => {
+                    clicked_at = Some((e.position.0 as f32, e.position.1 as f32));
+                }
+                _ => {}
+            }
+        }
+        if let Some((cx, cy)) = clicked_at {
+            match power_ui::hit_test(&self.power_menu, &self.outputs, cx, cy) {
+                PowerHit::ToggleButton => {
+                    self.power_menu.open = !self.power_menu.open;
+                    self.power_menu.kb_active = false;
+                    self.power_menu.clamp_selection();
+                    dirty = true;
+                }
+                PowerHit::Item(action) => {
+                    self.power_menu.open = false;
+                    self.power_menu.kb_active = false;
+                    dispatch_power(action);
+                    dirty = true;
+                }
+                PowerHit::None => {
+                    if self.power_menu.open {
+                        self.power_menu.open = false;
+                        self.power_menu.kb_active = false;
+                        dirty = true;
+                    }
+                }
+            }
+        }
+        if dirty {
+            self.draw();
+        }
+    }
+}
+
+fn dispatch_power(action: PowerAction) {
+    let verb = match action {
+        PowerAction::Restart => "reboot",
+        PowerAction::Shutdown => "poweroff",
+    };
+    log::info!("dispatch_power: {:?} (systemctl {})", action, verb);
+    std::thread::spawn(move || {
+        let out = std::process::Command::new("systemctl").arg(verb).output();
+        match out {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => log::warn!(
+                "systemctl {}: status={} stderr={:?}",
+                verb,
+                o.status,
+                String::from_utf8_lossy(&o.stderr).trim()
+            ),
+            Err(e) => log::warn!("systemctl {} spawn failed: {e}", verb),
+        }
+    });
+}
+
 delegate_compositor!(App);
 delegate_keyboard!(App);
 delegate_output!(App);
+delegate_pointer!(App);
 delegate_registry!(App);
 delegate_seat!(App);
 delegate_shm!(App);
