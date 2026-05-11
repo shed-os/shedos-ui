@@ -162,9 +162,7 @@ struct App {
     pool: SlotPool,
     theme: Theme,
     cache: WidgetCache,
-    /// Drops before `pointer` (declaration order = drop order) so the
-    /// cursor-shape device's destroy never lands on an already-dead
-    /// wl_pointer.
+    /// Must drop before `pointer`; keep declared first.
     cursor_device: Option<WpCursorShapeDeviceV1>,
     cursor_shape: Option<CursorShapeManager>,
     pointer: Option<WlPointer>,

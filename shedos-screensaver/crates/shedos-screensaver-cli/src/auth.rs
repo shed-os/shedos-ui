@@ -33,11 +33,15 @@ impl Conversation for FingerprintConv {
     fn info(&mut self, _msg: &CStr) {
         // pam_fprintd's "Place your finger" — informational only.
     }
-    fn error(&mut self, _msg: &CStr) {
-        // pam_fprintd's "Failed to match fingerprint" — fires per
-        // verify-no-match. Push immediately for real-time UI feedback.
-        let _ = self.tx.send(Err(()));
-        self.ping.ping();
+    fn error(&mut self, msg: &CStr) {
+        let text = msg.to_string_lossy();
+        let lower = text.to_ascii_lowercase();
+        if lower.contains("match") || lower.contains("verify") {
+            let _ = self.tx.send(Err(()));
+            self.ping.ping();
+        } else {
+            eprintln!("shedos-screensaver: pam-fp error (ignored): {text}");
+        }
     }
 }
 

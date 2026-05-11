@@ -389,12 +389,25 @@ fn run_loop(
             .as_ref()
             .map(|rx| rx.try_iter().collect())
             .unwrap_or_default();
+        let in_prompt = state
+            .lock_state
+            .as_ref()
+            .map(|ls| ls.phase() == LockPhase::Prompt)
+            .unwrap_or(false);
         for result in fp_results {
-            state.fingerprint_status = match result {
-                Ok(()) => FingerprintStatus::Success(now + FP_SUCCESS_HOLD),
-                Err(()) => FingerprintStatus::Failure(now + FP_FAILURE_HOLD),
-            };
-            state.mark_all_dirty();
+            match result {
+                Ok(()) => {
+                    state.fingerprint_status =
+                        FingerprintStatus::Success(now + FP_SUCCESS_HOLD);
+                    state.mark_all_dirty();
+                }
+                Err(()) if in_prompt => {
+                    state.fingerprint_status =
+                        FingerprintStatus::Failure(now + FP_FAILURE_HOLD);
+                    state.mark_all_dirty();
+                }
+                Err(()) => {}
+            }
         }
         // Post-attempt dwell: expire Failure back to Idle (and redraw);
         // release the lock when Success dwell expires (so the green
@@ -511,8 +524,7 @@ pub(crate) struct AppState {
     compositor_state: CompositorState,
     layer_shell: LayerShell,
     qh: QueueHandle<Self>,
-    /// `cursor_device` is a child of `pointer` (via cursor-shape-v1) and
-    /// must drop before it; field declaration order = drop order.
+    /// Must drop before `pointer`; keep declared first.
     cursor_device: Option<WpCursorShapeDeviceV1>,
     cursor_shape: Option<CursorShapeManager>,
     pointer: Option<WlPointer>,
@@ -600,6 +612,10 @@ impl AppState {
             }
             LockPhase::Prompt => {
                 self.prompt_password.clear();
+                self.fingerprint_status = FingerprintStatus::Idle;
+                if let Some(rx) = self.fingerprint_rx.as_ref() {
+                    while rx.try_recv().is_ok() {}
+                }
             }
             LockPhase::Dpms => {
                 for s in &self.surfaces {
