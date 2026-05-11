@@ -46,6 +46,35 @@ impl Wallpaper {
         &self.source_path
     }
 
+    /// Return true if the wallpaper's average luminance is below
+    /// 128. Samples a 10x10 grid (100 pixels) using Rec. 601 luma:
+    /// `Y = 0.299 R + 0.587 G + 0.114 B`. Used by the prompt-ui
+    /// cache to pick the wordmark variant whose glyphs contrast
+    /// with the background.
+    pub fn is_average_dark(&self) -> bool {
+        let rgba = self.decoded.to_rgba8();
+        let w = rgba.width();
+        let h = rgba.height();
+        if w == 0 || h == 0 {
+            return true;
+        }
+        const SAMPLES_PER_AXIS: u32 = 10;
+        let mut total: u64 = 0;
+        for sy in 0..SAMPLES_PER_AXIS {
+            for sx in 0..SAMPLES_PER_AXIS {
+                let x = (sx * w) / SAMPLES_PER_AXIS;
+                let y = (sy * h) / SAMPLES_PER_AXIS;
+                let px = rgba.get_pixel(x, y);
+                let r = px[0] as u64;
+                let g = px[1] as u64;
+                let b = px[2] as u64;
+                total += (299 * r + 587 * g + 114 * b) / 1000;
+            }
+        }
+        let avg = total / (SAMPLES_PER_AXIS as u64 * SAMPLES_PER_AXIS as u64);
+        avg < 128
+    }
+
     /// Paint the wallpaper into `rect`'s region of `canvas`. First
     /// call at a given (rect.w, rect.h) builds the cache entry with
     /// Lanczos3; subsequent calls memcpy from cache.

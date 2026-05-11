@@ -16,11 +16,13 @@ pub mod theme;
 pub mod wallpaper;
 pub mod watch;
 pub mod widgets;
+pub mod wordmark;
 
 pub use theme::Theme;
 
 use text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
 use wallpaper::Wallpaper;
+use wordmark::Wordmark;
 
 /// Prompt input state. Holds the count of typed characters (for dot
 /// rendering) and a few flags. Never the typed password itself.
@@ -42,30 +44,52 @@ pub struct OutputRect {
     pub h: i32,
 }
 
-/// Heavy state expensive to rebuild per frame: font faces and the
-/// per-surface wallpaper cache. Build once, reuse across frames.
+/// Heavy state expensive to rebuild per frame: font faces, the
+/// per-surface wallpaper cache, and the brand wordmark. Build once,
+/// reuse across frames.
 pub struct WidgetCache {
     pub regular: FontFace,
     pub bold: FontFace,
     wallpaper: Wallpaper,
+    pub wordmark: Wordmark,
 }
 
 impl WidgetCache {
-    /// Load fonts and decode the blurred wallpaper. The blurred
-    /// variant softens the background so the prompt reads cleanly;
-    /// desktop wallpaper daemons read `theme.wallpaper` directly.
+    /// Load fonts, decode the blurred wallpaper, then sample the
+    /// wallpaper's average luminance to pick the matching wordmark
+    /// variant (light glyphs on dark wallpaper / dark glyphs on
+    /// light wallpaper). The blurred variant softens the background
+    /// so the prompt reads cleanly; desktop wallpaper daemons read
+    /// `theme.wallpaper` directly.
     pub fn new(theme: &Theme) -> Result<Self> {
         let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
         let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
         let wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
-        Ok(Self { regular, bold, wallpaper })
+        let wordmark_path = if wallpaper.is_average_dark() {
+            &theme.wordmark_on_dark
+        } else {
+            &theme.wordmark_on_light
+        };
+        let wordmark = Wordmark::load(wordmark_path)?;
+        Ok(Self { regular, bold, wallpaper, wordmark })
     }
 
     /// Re-decode the wallpaper if the theme path changed (e.g. live
-    /// `shedman theme set` while the surface is up).
+    /// `shedman theme set` while the surface is up). Also re-picks
+    /// the wordmark variant if the wallpaper's luminance class
+    /// flipped (dark ↔ light), so the wordmark stays legible
+    /// against the new background.
     pub fn refresh_wallpaper(&mut self, theme: &Theme) -> Result<()> {
         if self.wallpaper.source_path() != theme.wallpaper_blurred {
             self.wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
+            let wordmark_path = if self.wallpaper.is_average_dark() {
+                &theme.wordmark_on_dark
+            } else {
+                &theme.wordmark_on_light
+            };
+            if self.wordmark.source_path() != wordmark_path.as_path() {
+                self.wordmark = Wordmark::load(wordmark_path)?;
+            }
         }
         Ok(())
     }
@@ -141,6 +165,7 @@ pub fn render(
             theme,
             &cache.regular,
             &cache.bold,
+            &mut cache.wordmark,
             params.error_message,
             params.greeting,
             params.fingerprint.as_ref(),

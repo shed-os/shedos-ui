@@ -23,6 +23,10 @@ pub struct Theme {
     pub text: u32,
     pub accent: u32,
     pub red: u32,
+    /// Wordmark variant for dark backgrounds (blue "Shed" + white "os").
+    pub wordmark_on_dark: PathBuf,
+    /// Wordmark variant for light backgrounds (blue "Shed" + black "os").
+    pub wordmark_on_light: PathBuf,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -65,6 +69,12 @@ impl Theme {
             text: 0xFFCDD6F4,
             accent: 0xFF89B4FA,
             red: 0xFFF38BA8,
+            wordmark_on_dark: PathBuf::from(
+                "/usr/share/shedos/shedos-wordmark-on-dark.png",
+            ),
+            wordmark_on_light: PathBuf::from(
+                "/usr/share/shedos/shedos-wordmark-on-light.png",
+            ),
         }
     }
 
@@ -141,6 +151,8 @@ impl Theme {
             text: parse_hex_or_fallback("text", colors.text.as_deref(), fb.text),
             accent: parse_hex_or_fallback("accent", colors.accent.as_deref(), fb.accent),
             red: parse_hex_or_fallback("red", colors.red.as_deref(), fb.red),
+            wordmark_on_dark: fb.wordmark_on_dark.clone(),
+            wordmark_on_light: fb.wordmark_on_light.clone(),
         }
     }
 }

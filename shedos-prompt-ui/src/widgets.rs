@@ -39,6 +39,7 @@ pub fn paint_widgets(
     theme: &Theme,
     regular: &FontFace,
     bold: &FontFace,
+    wordmark: &mut crate::wordmark::Wordmark,
     error_message: Option<&str>,
     greeting: Option<&str>,
     fingerprint: Option<&FingerprintRender<'_>>,
@@ -148,13 +149,19 @@ pub fn paint_widgets(
         );
     }
 
-    // Branding near bottom of the rect.
-    let brand = "ShedOS";
-    let brand_w = bold.measure_width(brand, BRAND_PX);
-    let brand_x = px + (pw - brand_w) / 2;
-    let brand_y = py + (ph as f32 * 0.93) as i32;
-    bold.render(
-        brand, BRAND_PX, brand_x, brand_y, accent_color, 0x99,
-        canvas, canvas_w, canvas_h,
+    // Brand wordmark near bottom of the rect. Target width scales
+    // with the output so it stays visually comparable across 1080p
+    // / 4K / portrait outputs without becoming oversized on small
+    // screens or thumbnail-sized on large ones.
+    let wordmark_target_w = (pw / 3).clamp(360, 900) as u32;
+    let center_x = px + pw / 2;
+    let center_y = py + (ph as f32 * 0.85) as i32;
+    wordmark.blit_centered(
+        canvas,
+        canvas_w,
+        canvas_h,
+        center_x,
+        center_y,
+        wordmark_target_w,
     );
 }
