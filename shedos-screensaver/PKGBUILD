@@ -31,6 +31,8 @@ makedepends=(
     'cargo'
     'scdoc'                 # man page render
     'pkgconf'               # cpal probes alsa via pkg-config
+    'clang'                 # pam-sys uses bindgen at build time; bindgen
+                            # needs libclang.so to parse <security/pam_appl.h>
 )
 backup=(
     'etc/shedos/screensaver.toml'
