@@ -7,7 +7,7 @@
 
 pkgname=shedos-greeter
 pkgver=2026.05.08
-pkgrel=4
+pkgrel=5
 pkgdesc='ShedOS greetd greeter (login screen)'
 arch=('x86_64')
 url='https://github.com/theshedman/shedos'
