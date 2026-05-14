@@ -453,9 +453,7 @@ impl KeyboardHandler for App {
                 self.power_menu.clamp_selection();
             }
             Keysym::Escape => {
-                log::info!("Escape pressed; exiting");
-                self.exit = true;
-                return;
+                self.password.clear();
             }
             Keysym::BackSpace => {
                 self.password.pop();
