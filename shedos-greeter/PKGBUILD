@@ -1,4 +1,4 @@
-# Maintainer: ShedOS <https://github.com/theshedman/shedos>
+# Maintainer: ShedOS <https://github.com/Theshedman/shedos>
 #
 # Custom greetd greeter. Renders the wallpaper, clock, branding,
 # and password input directly via
@@ -10,7 +10,7 @@ pkgver=2026.05.08
 pkgrel=5
 pkgdesc='ShedOS greetd greeter (login screen)'
 arch=('x86_64')
-url='https://github.com/theshedman/shedos'
+url='https://github.com/Theshedman/shedos'
 license=('GPL-3.0-or-later')
 
 depends=(

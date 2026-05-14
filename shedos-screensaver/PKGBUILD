@@ -1,4 +1,4 @@
-# Maintainer: ShedOS <https://github.com/theshedman/shedos>
+# Maintainer: ShedOS <https://github.com/Theshedman/shedos>
 #
 # Animated screensaver subsystem (Rust). One binary,
 # /usr/bin/shedos-screensaver, with a TTY backend (crossterm) and a
@@ -11,7 +11,7 @@ pkgver=2026.05.11
 pkgrel=1
 pkgdesc='Animated screensaver: TTY + Wayland backends, 8 styles, audio-reactive'
 arch=('x86_64')
-url='https://github.com/theshedman/shedos'
+url='https://github.com/Theshedman/shedos'
 license=('GPL-3.0-or-later')
 install=shedos-screensaver.install
 depends=(
