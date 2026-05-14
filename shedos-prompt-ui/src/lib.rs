@@ -125,6 +125,7 @@ pub struct FingerprintRender<'a> {
 ///
 /// `canvas` is wl_shm Argb8888 (BGRA on little-endian); length must
 /// be at least `canvas_w * canvas_h * 4`.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     canvas: &mut [u8],
     canvas_w: u32,
