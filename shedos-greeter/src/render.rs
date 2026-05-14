@@ -614,7 +614,7 @@ impl PointerHandler for App {
                         dirty = true;
                     }
                 }
-                PointerEventKind::Press { button, .. } if button == 0x110 => {
+                PointerEventKind::Press { button: 0x110, .. } => {
                     clicked_at = Some((e.position.0 as f32, e.position.1 as f32));
                 }
                 _ => {}
