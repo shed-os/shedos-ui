@@ -22,6 +22,7 @@ const INPUT_W: u32 = 300;
 const INPUT_H: u32 = 50;
 const INPUT_RADIUS: u32 = 10;
 const INPUT_BORDER: u32 = 2;
+const INPUT_PAD: i32 = 12;
 
 const FP_ICON_SIZE: f32 = 40.0;
 const FP_ICON_GAP: i32 = 18;
@@ -101,26 +102,44 @@ pub fn paint_widgets(
         );
     }
 
-    // Render password as bullet glyphs.
-    if state.typed_chars > 0 {
-        let dots: String = "●".repeat(state.typed_chars);
-        let dots_w = regular.measure_width(&dots, INPUT_FONT_PX);
-        let dots_x = box_x + ((INPUT_W as i32 - dots_w) / 2);
-        let dots_y = box_y + (INPUT_H as i32 * 2 / 3);
-        regular.render(
-            &dots, INPUT_FONT_PX, dots_x, dots_y, text_color, 0xff, canvas, canvas_w, canvas_h,
-        );
-    }
-
-    // Caps-lock indicator (small uppercase tag at the right edge of the input).
-    if state.capslock {
+    // Caps-lock tag at the left edge of the input. Rendered before
+    // the password dots so the dot-centering math can reserve room
+    // for it. When caps is off, the dots use the full inner width.
+    let caps_region_w = if state.capslock {
         let tag = "CAPS";
         let tag_w = bold.measure_width(tag, BRAND_PX);
-        let tag_x = box_x + INPUT_W as i32 - tag_w - 12;
+        let tag_x = box_x + INPUT_PAD;
         let tag_y = box_y + (INPUT_H as i32 * 2 / 3);
         bold.render(
             tag, BRAND_PX, tag_x, tag_y, accent_color, 0xcc,
             canvas, canvas_w, canvas_h,
+        );
+        INPUT_PAD + tag_w + INPUT_PAD
+    } else {
+        0
+    };
+
+    // Render password as bullet glyphs. Cap the visible count to what
+    // fits inside the input box (minus the CAPS reservation on the
+    // left) so long passwords don't render past the rounded edges;
+    // doubles as a shoulder-surfer guard since the displayed length
+    // stops growing past the cap.
+    if state.typed_chars > 0 {
+        let bullet_w = regular.measure_width("●", INPUT_FONT_PX);
+        let dots_region_x = box_x + caps_region_w;
+        let dots_region_w = (INPUT_W as i32 - caps_region_w - INPUT_PAD).max(0);
+        let max_dots = if bullet_w > 0 {
+            ((dots_region_w / bullet_w) as usize).max(1)
+        } else {
+            state.typed_chars
+        };
+        let visible = state.typed_chars.min(max_dots);
+        let dots: String = "●".repeat(visible);
+        let dots_w = regular.measure_width(&dots, INPUT_FONT_PX);
+        let dots_x = dots_region_x + ((dots_region_w - dots_w) / 2);
+        let dots_y = box_y + (INPUT_H as i32 * 2 / 3);
+        regular.render(
+            &dots, INPUT_FONT_PX, dots_x, dots_y, text_color, 0xff, canvas, canvas_w, canvas_h,
         );
     }
 
