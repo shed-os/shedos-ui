@@ -1,5 +1,13 @@
 # shedos-screensaver install scriptlet
 
+post_install() {
+    # No first-run setup needed today; pam config + binaries are
+    # shipped as files. Present so a future scriptlet addition mirrors
+    # cleanly across both phases without rediscovering the
+    # post_install / post_upgrade asymmetry trap.
+    :
+}
+
 post_upgrade() {
     # Gate by previous pkgver: pacman removes hyprlock via conflicts=
     # before this hook runs, so a runtime `pacman -Qq` check is too late.
