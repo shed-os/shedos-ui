@@ -7,7 +7,7 @@
 # wallpaper compositing in Wayland mode; fluent-rs i18n.
 
 pkgname=shedos-screensaver
-pkgver=2026.05.14
+pkgver=2026.05.16
 pkgrel=1
 pkgdesc='Animated screensaver: TTY + Wayland backends, 8 styles, audio-reactive'
 arch=('x86_64')
