@@ -11,6 +11,8 @@ Type=simple
 ExecStartPre=-/usr/bin/hyprshade off
 ExecStart=/usr/bin/shedos-screensaver --mode=lock
 Restart=on-failure
-RestartSec=5
-StartLimitBurst=3
+# Respawn fast: the session stays input-locked while the client is gone,
+# so a long delay only prolongs the stale frame the compositor shows.
+RestartSec=200ms
+StartLimitBurst=5
 StartLimitIntervalSec=60

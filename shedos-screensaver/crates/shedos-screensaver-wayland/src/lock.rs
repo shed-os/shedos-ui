@@ -23,6 +23,12 @@ pub(crate) fn should_unlock(locked: bool, authenticated: bool, finished: bool) -
     locked && authenticated && !finished
 }
 
+/// A clean loop exit that neither authenticated nor was ended by the
+/// compositor is reported as failure so the unit respawns and re-locks.
+pub(crate) fn exit_is_failure(authenticated: bool, finished: bool) -> bool {
+    !authenticated && !finished
+}
+
 impl LockBinding {
     pub(crate) fn new(lock: ExtSessionLockV1) -> Self {
         Self {
@@ -130,5 +136,13 @@ mod tests {
     fn never_unlock_after_finished() {
         // After `finished`, unlock_and_destroy is a protocol error.
         assert!(!should_unlock(true, true, true));
+    }
+
+    #[test]
+    fn signal_exit_fails_to_respawn() {
+        use super::exit_is_failure;
+        assert!(exit_is_failure(false, false)); // signal/error → respawn
+        assert!(!exit_is_failure(true, false)); // authed unlock → done
+        assert!(!exit_is_failure(false, true)); // compositor ended → done
     }
 }

@@ -12,7 +12,7 @@
 //! `None` and audio-reactive effects fall back to silence.
 
 use crate::font::FontAtlas;
-use crate::lock::LockBinding;
+use crate::lock::{exit_is_failure, LockBinding};
 use crate::wallpaper::Wallpaper;
 use crate::dpms;
 use crate::{
@@ -346,6 +346,10 @@ impl WaylandRenderer {
             .lock_binding
             .as_ref()
             .is_some_and(|lb| lb.authenticated);
+        let finished = state
+            .lock_binding
+            .as_ref()
+            .is_some_and(|lb| lb.finished);
         if authenticated {
             clear_lock_sentinel();
         }
@@ -355,6 +359,11 @@ impl WaylandRenderer {
         }
         let _ = conn.flush();
 
+        // A non-auth interruption is reported as failure so the unit's
+        // Restart=on-failure respawns the lock, not a stuck session.
+        if result.is_ok() && exit_is_failure(authenticated, finished) {
+            return Err(WaylandError::Interrupted("exited without authentication".into()));
+        }
         result
     }
 }
@@ -1044,6 +1053,7 @@ pub enum WaylandError {
     Buffer(String),
     Dispatch(String),
     Font(String),
+    Interrupted(String),
 }
 
 impl std::fmt::Display for WaylandError {
@@ -1055,6 +1065,7 @@ impl std::fmt::Display for WaylandError {
             Self::Buffer(s) => write!(f, "wl_buffer: {s}"),
             Self::Dispatch(s) => write!(f, "wayland dispatch: {s}"),
             Self::Font(s) => write!(f, "font load: {s}"),
+            Self::Interrupted(s) => write!(f, "lock interrupted: {s}"),
         }
     }
 }
