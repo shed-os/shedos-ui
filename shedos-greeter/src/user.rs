@@ -32,7 +32,10 @@ fn autodetect() -> Option<String> {
             continue;
         }
         let name = fields[0];
-        let uid: u32 = fields[2].parse().ok()?;
+        // A malformed line skips; it must not abort the whole scan.
+        let Ok(uid) = fields[2].parse::<u32>() else {
+            continue;
+        };
         let shell = fields[6];
         // Real users live in 1000..65534. Skip nobody (65534).
         if (1000..65534).contains(&uid) && !shell.ends_with("/false") && !shell.ends_with("/nologin")

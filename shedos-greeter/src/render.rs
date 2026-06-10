@@ -17,6 +17,8 @@ use shedos_prompt_ui::{
     power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
     watch, OutputRect, PromptState, RenderParams, Theme, WidgetCache,
 };
+use smithay_client_toolkit::reexports::calloop::{ping::make_ping, EventLoop};
+use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry,
@@ -67,7 +69,7 @@ pub fn run() -> Result<()> {
 
     let conn = Connection::connect_to_env()
         .context("connect to Wayland display (is WAYLAND_DISPLAY set?)")?;
-    let (globals, mut event_queue) =
+    let (globals, event_queue) =
         registry_queue_init::<App>(&conn).context("init Wayland registry")?;
     let qh = event_queue.handle();
 
@@ -142,13 +144,46 @@ pub fn run() -> Result<()> {
         error_text: String::new(),
         error_until: None,
         theme_dirty,
+        password_tx: None,
+        auth_events: None,
+        fingerprint_hint: None,
+        authenticating: false,
         exit: false,
     };
 
+    // calloop drives the Wayland queue plus a ping the auth worker
+    // fires after posting an event, so PAM progress (fingerprint
+    // window, prompt, result) repaints without waiting for input.
+    let mut event_loop: EventLoop<App> =
+        EventLoop::try_new().context("create calloop event loop")?;
+    let (ping, ping_source) = make_ping().context("create calloop ping")?;
+    event_loop
+        .handle()
+        .insert_source(ping_source, |_, _, app: &mut App| {
+            app.drain_auth_events();
+        })
+        .map_err(|e| anyhow::anyhow!("insert ping source: {e}"))?;
+    WaylandSource::new(conn.clone(), event_queue)
+        .insert(event_loop.handle())
+        .map_err(|e| anyhow::anyhow!("insert wayland source: {e}"))?;
+
+    // Start the greetd conversation eagerly: with pam_fprintd in
+    // /etc/pam.d/greetd the reader is armed before the first
+    // keystroke, so touch-to-login works straight from boot.
+    if let Some(username) = app.username.clone() {
+        let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+        let wake_ping = ping.clone();
+        let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
+        app.password_tx = Some(greetd::spawn(username, cmd, ev_tx, move || {
+            wake_ping.ping();
+        }));
+        app.auth_events = Some(ev_rx);
+    }
+
     while !app.exit {
-        event_queue
-            .blocking_dispatch(&mut app)
-            .context("Wayland event dispatch")?;
+        event_loop
+            .dispatch(None, &mut app)
+            .context("event loop dispatch")?;
     }
     Ok(())
 }
@@ -182,6 +217,15 @@ struct App {
     error_text: String,
     error_until: Option<Instant>,
     theme_dirty: Arc<AtomicBool>,
+    /// Auth conversation worker (greetd.rs). Passwords go down the
+    /// sender; events come back via the receiver, drained when the
+    /// worker pings the calloop loop.
+    password_tx: Option<std::sync::mpsc::Sender<String>>,
+    auth_events: Option<std::sync::mpsc::Receiver<greetd::AuthEvent>>,
+    /// fprintd window open: show the affordance with this hint.
+    fingerprint_hint: Option<String>,
+    /// A password has been submitted and PAM hasn't answered yet.
+    authenticating: bool,
     exit: bool,
 }
 
@@ -214,31 +258,57 @@ impl App {
     }
 
     fn submit(&mut self) {
-        let Some(username) = self.username.clone() else {
-            log::warn!("submit: no username configured (set /etc/shedos/login-user)");
-            self.password.clear();
+        let password = std::mem::take(&mut self.password);
+        let Some(tx) = &self.password_tx else {
+            log::warn!("submit: no auth worker (set /etc/shedos/login-user)");
             return;
         };
-        let password = std::mem::take(&mut self.password);
-        // Wrapper redirects uwsm + Hyprland stdout/stderr into journald
-        // so the post-auth gap doesn't flash text on the framebuffer
-        // console. Logs surface via `journalctl -t hyprland-session`.
-        let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
-        match greetd::Auth::connect().and_then(|mut a| a.login(&username, &password, cmd)) {
-            Ok(()) => {
-                log::info!("auth + start_session OK; greeter exiting for {}", username);
-                self.exit = true;
+        // The worker answers PAM's prompt with this — immediately if
+        // the prompt is already waiting, or buffered until the
+        // fingerprint window closes.
+        if tx.send(password).is_err() {
+            log::warn!("submit: auth worker gone");
+            return;
+        }
+        self.authenticating = true;
+        self.draw();
+    }
+
+    /// Drain worker events; called from the calloop ping source.
+    fn drain_auth_events(&mut self) {
+        let mut redraw = false;
+        loop {
+            let ev = match &self.auth_events {
+                Some(rx) => match rx.try_recv() {
+                    Ok(ev) => ev,
+                    Err(_) => break,
+                },
+                None => break,
+            };
+            redraw = true;
+            match ev {
+                greetd::AuthEvent::Fingerprint(hint) => {
+                    self.fingerprint_hint = Some(hint);
+                }
+                greetd::AuthEvent::PromptReady => {
+                    // fprintd window over (or never open).
+                    self.fingerprint_hint = None;
+                }
+                greetd::AuthEvent::Failed(msg) => {
+                    log::warn!("login failed: {msg}");
+                    self.authenticating = false;
+                    self.fingerprint_hint = None;
+                    self.error_text = if msg.is_empty() { ERROR_TEXT.to_string() } else { msg };
+                    self.error_until = Some(Instant::now() + ERROR_HOLD);
+                }
+                greetd::AuthEvent::SessionStarted => {
+                    log::info!("auth + start_session OK; greeter exiting");
+                    self.exit = true;
+                }
             }
-            Err(e) => {
-                log::warn!("login failed: {:#}", e);
-                let msg = format!("{:#}", e);
-                self.error_text = if msg.is_empty() {
-                    ERROR_TEXT.to_string()
-                } else {
-                    msg
-                };
-                self.error_until = Some(Instant::now() + ERROR_HOLD);
-            }
+        }
+        if redraw {
+            self.draw();
         }
     }
 
@@ -268,7 +338,11 @@ impl App {
             None => false,
         };
         let typed_chars = self.password.chars().count();
-        let greeting = self.username.as_ref().map(|n| format!("Hi, {n}")).unwrap_or_else(|| "Hi".to_string());
+        let greeting = if self.authenticating {
+            "Authenticating…".to_string()
+        } else {
+            self.username.as_ref().map(|n| format!("Hi, {n}")).unwrap_or_else(|| "Hi".to_string())
+        };
         let error_msg = if error_active {
             Some(if self.error_text.is_empty() { ERROR_TEXT } else { self.error_text.as_str() })
         } else {
@@ -303,7 +377,12 @@ impl App {
             &RenderParams {
                 greeting: Some(greeting.as_str()),
                 error_message: error_msg,
-                fingerprint: None,
+                fingerprint: self.fingerprint_hint.as_deref().map(|hint| {
+                    prompt_ui::FingerprintRender {
+                        hint,
+                        icon_color_argb: 0xff89b4fa,
+                    }
+                }),
             },
         );
 
