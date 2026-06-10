@@ -341,7 +341,12 @@ impl WaylandRenderer {
 
         let result = run_loop(&mut state, &mut event_loop);
 
-        if result.is_ok() {
+        // Clear the sentinel only on a real unlock; close() is fail-closed.
+        let authenticated = state
+            .lock_binding
+            .as_ref()
+            .is_some_and(|lb| lb.authenticated);
+        if authenticated {
             clear_lock_sentinel();
         }
 
@@ -431,7 +436,7 @@ fn run_loop(
                 state.mark_all_dirty();
             }
             FingerprintStatus::Success(until) if Instant::now() >= until => {
-                state.should_exit.store(true, Ordering::Release);
+                state.mark_authenticated();
             }
             _ => {}
         }
@@ -580,6 +585,14 @@ impl AppState {
             || self.lock_binding.as_ref().is_some_and(|lb| lb.finished)
     }
 
+    /// The only path that may release the lock: mark auth, then exit.
+    fn mark_authenticated(&mut self) {
+        if let Some(lb) = self.lock_binding.as_mut() {
+            lb.authenticated = true;
+        }
+        self.should_exit.store(true, Ordering::Release);
+    }
+
     fn handle_input(&mut self) {
         if self.idle_daemon {
             return;
@@ -602,7 +615,7 @@ impl AppState {
             return;
         }
         match auth(&password) {
-            Ok(()) => self.should_exit.store(true, Ordering::Release),
+            Ok(()) => self.mark_authenticated(),
             Err(msg) => self.error = Some((Instant::now() + ERROR_HOLD, msg)),
         }
         self.mark_all_dirty();

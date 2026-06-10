@@ -12,7 +12,15 @@ pub(crate) struct LockBinding {
     pub(crate) lock: ExtSessionLockV1,
     pub(crate) locked: bool,
     pub(crate) finished: bool,
+    /// Only a successful auth unlocks; any other teardown stays locked.
+    pub(crate) authenticated: bool,
     closed: bool,
+}
+
+/// `unlock_and_destroy` is valid only while locked, authed, and not
+/// finished (after which it's a protocol error). Pure for testing.
+pub(crate) fn should_unlock(locked: bool, authenticated: bool, finished: bool) -> bool {
+    locked && authenticated && !finished
 }
 
 impl LockBinding {
@@ -21,16 +29,17 @@ impl LockBinding {
             lock,
             locked: false,
             finished: false,
+            authenticated: false,
             closed: false,
         }
     }
 
-    /// Idempotent. `unlock_and_destroy` is only legal once `Locked` has been seen.
+    /// Idempotent. Unlocks only after auth; otherwise destroys, staying locked.
     pub(crate) fn close(&mut self) {
         if self.closed {
             return;
         }
-        if self.locked {
+        if should_unlock(self.locked, self.authenticated, self.finished) {
             self.lock.unlock_and_destroy();
         } else {
             self.lock.destroy();
@@ -94,5 +103,32 @@ impl Dispatch<ExtSessionLockSurfaceV1, ()> for AppState {
             proxy.ack_configure(serial);
             state.apply_lock_surface_configure(proxy, width, height);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_unlock;
+
+    #[test]
+    fn locked_without_auth_never_unlocks() {
+        // Error/signal teardown (locked, not authed) must not unlock.
+        assert!(!should_unlock(true, false, false));
+    }
+
+    #[test]
+    fn authenticated_unlock() {
+        assert!(should_unlock(true, true, false));
+    }
+
+    #[test]
+    fn never_unlock_before_locked() {
+        assert!(!should_unlock(false, true, false));
+    }
+
+    #[test]
+    fn never_unlock_after_finished() {
+        // After `finished`, unlock_and_destroy is a protocol error.
+        assert!(!should_unlock(true, true, true));
     }
 }

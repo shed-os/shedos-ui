@@ -241,9 +241,16 @@ fn main() -> ExitCode {
         }
     }
 
+    // Lock mode needs a restricted signal set (see install_for_lock).
+    let resolved_mode = resolve_mode(cli.mode);
+
     // Signal handling for graceful exit.
-    let signal_listener =
-        SignalListener::install().unwrap_or_else(|e| panic!("signal install: {e}"));
+    let signal_listener = if matches!(resolved_mode, Mode::Lock) {
+        SignalListener::install_for_lock()
+    } else {
+        SignalListener::install()
+    }
+    .unwrap_or_else(|e| panic!("signal install: {e}"));
     let exit_flag = signal_listener.flag();
 
     // Audio capture.
@@ -262,7 +269,6 @@ fn main() -> ExitCode {
     }
 
     // Mode dispatch.
-    let resolved_mode = resolve_mode(cli.mode);
     let result = match resolved_mode {
         Mode::Wayland => run_wayland(&cli, color_override, audio, Arc::clone(&exit_flag)),
         Mode::Lock => run_lock(&cli, color_override, audio, Arc::clone(&exit_flag)),
@@ -603,7 +609,11 @@ fn run_lock(
     let effect = cli.effect.clone();
     let cycle = cli.cycle.clone();
     let hold = Duration::from_secs_f32(cli.hold.max(0.0));
-    let duration = cli.duration;
+    // --duration must never auto-unlock a lock; ignore it.
+    if cli.duration.is_some() {
+        eprintln!("shedos-screensaver: --duration is ignored in lock mode");
+    }
+    let duration: Option<f32> = None;
     let exit_for_factory = Arc::clone(&exit_flag);
     let mut audio_one_shot = audio;
 
@@ -626,14 +636,6 @@ fn run_lock(
             start: Duration::ZERO,
         }) as Box<dyn FrameProducer>
     });
-
-    if let Some(d) = cli.duration {
-        let f = Arc::clone(&exit_flag);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs_f32(d));
-            f.store(true, Ordering::Release);
-        });
-    }
 
     WaylandRenderer::run_locked(cfg, factory, exit_flag, lock_config)
         .map_err(|e| format!("lock: {e}"))

@@ -21,6 +21,16 @@ impl SignalListener {
         Ok(Self { flag })
     }
 
+    /// SIGUSR1 (the dismiss convention) defaults to Term, so register it
+    /// to a dead flag — a real no-op that can't kill the lock client.
+    pub fn install_for_lock() -> std::io::Result<Self> {
+        let flag = Arc::new(AtomicBool::new(false));
+        flag::register(SIGINT, Arc::clone(&flag))?;
+        flag::register(SIGTERM, Arc::clone(&flag))?;
+        flag::register(SIGUSR1, Arc::new(AtomicBool::new(false)))?;
+        Ok(Self { flag })
+    }
+
     pub fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.flag)
     }
