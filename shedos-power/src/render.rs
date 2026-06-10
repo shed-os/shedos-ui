@@ -240,8 +240,9 @@ impl App {
 
     fn activate(&mut self, action: Action) {
         match action {
-            Action::Lock => {
-                self.commit_action(Action::Lock);
+            // Lock and Sleep are non-destructive; no confirmation step.
+            Action::Lock | Action::Suspend => {
+                self.commit_action(action);
             }
             Action::Restart | Action::Shutdown => {
                 self.state.enter_confirming(action);

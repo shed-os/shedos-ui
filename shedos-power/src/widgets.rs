@@ -6,17 +6,19 @@ use shedos_prompt_ui::text::FontFace;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Lock,
+    Suspend,
     Restart,
     Shutdown,
 }
 
 impl Action {
-    pub fn all() -> [Action; 3] {
-        [Action::Lock, Action::Restart, Action::Shutdown]
+    pub fn all() -> [Action; 4] {
+        [Action::Lock, Action::Suspend, Action::Restart, Action::Shutdown]
     }
     pub fn label(self) -> &'static str {
         match self {
             Action::Lock => "Lock screen",
+            Action::Suspend => "Sleep",
             Action::Restart => "Reboot",
             Action::Shutdown => "Shut down",
         }
@@ -24,20 +26,21 @@ impl Action {
     pub fn glyph(self) -> char {
         match self {
             Action::Lock => '\u{F023}',
+            Action::Suspend => '\u{F186}',
             Action::Restart => '\u{F021}',
             Action::Shutdown => '\u{F011}',
         }
     }
     pub fn confirm_question(self) -> &'static str {
         match self {
-            Action::Lock => "",
+            Action::Lock | Action::Suspend => "",
             Action::Restart => "Reboot?",
             Action::Shutdown => "Shut down?",
         }
     }
     pub fn confirm_button(self) -> &'static str {
         match self {
-            Action::Lock => "",
+            Action::Lock | Action::Suspend => "",
             Action::Restart => "Reboot",
             Action::Shutdown => "Shut down",
         }
@@ -45,6 +48,7 @@ impl Action {
     pub fn action_color(self) -> (u8, u8, u8) {
         match self {
             Action::Lock => BLUE,
+            Action::Suspend => MAUVE,
             Action::Restart => YELLOW,
             Action::Shutdown => CORAL,
         }
@@ -62,6 +66,7 @@ const BACKDROP_RGB: (u8, u8, u8) = (0x1e, 0x1e, 0x2e);
 const BACKDROP_ALPHA: u8 = 0xb3; // 0.7
 
 const BLUE: (u8, u8, u8) = (0x89, 0xb4, 0xfa);
+const MAUVE: (u8, u8, u8) = (0xcb, 0xa6, 0xf7);
 const YELLOW: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
 const CORAL: (u8, u8, u8) = (0xf3, 0x8b, 0xa8);
 
@@ -141,12 +146,12 @@ impl PowerState {
     }
 
     pub fn focused_action(&self) -> Action {
-        Action::all()[self.focus_menu.min(2)]
+        Action::all()[self.focus_menu.min(Action::all().len() - 1)]
     }
 
     pub fn move_menu(&mut self, delta: i32) {
         if matches!(self.phase, Phase::Menu | Phase::Opening) {
-            let n = 3i32;
+            let n = Action::all().len() as i32;
             let f = self.focus_menu as i32;
             self.focus_menu = ((f + delta).rem_euclid(n)) as usize;
         }
@@ -231,11 +236,12 @@ fn anim(now: Instant, started: Instant, delay_ms: u32, duration_ms: u32) -> f32 
 // ---------- layout helpers ----------
 
 fn menu_card_height() -> i32 {
+    let rows = Action::all().len() as i32;
     CARD_PAD_Y
         + POWER_LABEL_PX as i32
         + POWER_LABEL_GAP
-        + ROW_HEIGHT * 3
-        + ROW_GAP * 2
+        + ROW_HEIGHT * rows
+        + ROW_GAP * (rows - 1)
         + CARD_PAD_Y
 }
 
@@ -301,7 +307,7 @@ fn confirm_button_rect(
 }
 
 pub fn hit_test_menu(canvas_w: u32, canvas_h: u32, x: f32, y: f32) -> Option<usize> {
-    for row in 0..3 {
+    for row in 0..Action::all().len() {
         let (rx, ry, rw, rh) = menu_row_rect(canvas_w, canvas_h, row);
         if x >= rx as f32 && x < (rx + rw as i32) as f32 && y >= ry as f32 && y < (ry + rh as i32) as f32 {
             return Some(row);
@@ -686,6 +692,7 @@ pub fn dispatch_action(action: Action) -> std::io::Result<std::process::Child> {
     use std::process::Command;
     match action {
         Action::Lock => Command::new("loginctl").arg("lock-session").spawn(),
+        Action::Suspend => Command::new("systemctl").arg("suspend").spawn(),
         Action::Restart => Command::new("systemctl").arg("reboot").spawn(),
         Action::Shutdown => Command::new("systemctl").arg("poweroff").spawn(),
     }

@@ -10,10 +10,11 @@ shedos-power - power menu overlay for ShedOS
 
 # DESCRIPTION
 
-*shedos-power* opens a fullscreen centred overlay listing the three
-power actions: *Lock screen*, *Reboot*, and *Shut down*. Lock is one
-click; Reboot and Shut down each open a confirmation card before
-firing. The overlay claims a *wlr-layer-shell-unstable-v1* surface
+*shedos-power* opens a fullscreen centred overlay listing the four
+power actions: *Lock screen*, *Sleep*, *Reboot*, and *Shut down*.
+Lock and Sleep are one click; Reboot and Shut down each open a
+confirmation card before firing. The overlay claims a
+*wlr-layer-shell-unstable-v1* surface
 on the active output with exclusive keyboard interactivity, dims the
 desktop behind a Catppuccin Mocha backdrop, and exits when the user
 either commits an action or dismisses.
@@ -26,8 +27,8 @@ power* is called with no argument.
 # INTERACTION
 
 *Mouse*
-	Click a row to select it. Lock executes immediately; Reboot and
-	Shut down swap to a confirm card. On the confirm card, *Cancel*
+	Click a row to select it. Lock and Sleep execute immediately;
+	Reboot and Shut down swap to a confirm card. On the confirm card, *Cancel*
 	returns to the menu and the action button executes. Clicking
 	outside the card dismisses.
 
@@ -42,6 +43,10 @@ power* is called with no argument.
 
 *Lock screen*
 	Runs *loginctl lock-session*. One click — no confirmation.
+
+*Sleep*
+	Runs *systemctl suspend*. One click — no confirmation; hypridle
+	locks the session before the machine sleeps.
 
 *Reboot*
 	Runs *systemctl reboot* after confirmation.

@@ -6,6 +6,7 @@ use crate::OutputRect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerAction {
+    Suspend,
     Restart,
     Shutdown,
 }
@@ -13,13 +14,18 @@ pub enum PowerAction {
 impl PowerAction {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Suspend => "Sleep",
             Self::Restart => "Restart",
             Self::Shutdown => "Shut down",
         }
     }
 
     pub fn all() -> &'static [PowerAction] {
-        &[PowerAction::Restart, PowerAction::Shutdown]
+        &[
+            PowerAction::Suspend,
+            PowerAction::Restart,
+            PowerAction::Shutdown,
+        ]
     }
 }
 

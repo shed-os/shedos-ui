@@ -1455,6 +1455,7 @@ impl PointerHandler for AppState {
 
 fn dispatch_power_lock(action: PowerAction) {
     let verb = match action {
+        PowerAction::Suspend => "suspend",
         PowerAction::Restart => "reboot",
         PowerAction::Shutdown => "poweroff",
     };

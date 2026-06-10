@@ -649,6 +649,7 @@ impl PointerHandler for App {
 
 fn dispatch_power(action: PowerAction) {
     let verb = match action {
+        PowerAction::Suspend => "suspend",
         PowerAction::Restart => "reboot",
         PowerAction::Shutdown => "poweroff",
     };
