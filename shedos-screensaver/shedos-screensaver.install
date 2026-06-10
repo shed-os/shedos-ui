@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # shedos-screensaver install scriptlet
 
 post_install() {
