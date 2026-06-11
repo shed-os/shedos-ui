@@ -101,11 +101,23 @@ pub type ProducerFactory = Box<dyn FnMut() -> Box<dyn FrameProducer>>;
 pub struct WaylandRenderer;
 
 impl WaylandRenderer {
-    pub fn run(
+    /// Shared bring-up for both entry points: connect, bind the
+    /// globals, load the font, and build the AppState with non-lock
+    /// defaults. run_locked() flips the lock-specific fields after.
+    fn bootstrap(
         config: WaylandConfig,
         producer_factory: ProducerFactory,
         should_exit: Arc<AtomicBool>,
-    ) -> Result<(), WaylandError> {
+    ) -> Result<
+        (
+            Connection,
+            wayland_client::EventQueue<AppState>,
+            wayland_client::globals::GlobalList,
+            QueueHandle<AppState>,
+            AppState,
+        ),
+        WaylandError,
+    > {
         let conn = Connection::connect_to_env()
             .map_err(|e| WaylandError::Connect(format!("{e}")))?;
         let (globals, event_queue) = registry_queue_init(&conn)
@@ -126,7 +138,7 @@ impl WaylandRenderer {
         let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
             .map_err(|e| WaylandError::Font(format!("{e}")))?;
 
-        let mut state = AppState {
+        let state = AppState {
             registry_state,
             output_state,
             seat_state,
@@ -138,7 +150,7 @@ impl WaylandRenderer {
             cursor_shape,
             pointer: None,
             keyboard: None,
-            should_exit: Arc::clone(&should_exit),
+            should_exit,
             input_dismissed: false,
             idle_daemon: config.idle_daemon,
             producer_factory,
@@ -164,7 +176,16 @@ impl WaylandRenderer {
             fingerprint_paused: None,
             fingerprint_status: FingerprintStatus::Idle,
         };
-        let _ = config.fps_cap;
+        Ok((conn, event_queue, globals, qh, state))
+    }
+
+    pub fn run(
+        config: WaylandConfig,
+        producer_factory: ProducerFactory,
+        should_exit: Arc<AtomicBool>,
+    ) -> Result<(), WaylandError> {
+        let (conn, event_queue, _globals, _qh, mut state) =
+            Self::bootstrap(config, producer_factory, should_exit)?;
 
         let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
             .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
@@ -188,25 +209,8 @@ impl WaylandRenderer {
         should_exit: Arc<AtomicBool>,
         lock_config: LockConfig,
     ) -> Result<(), WaylandError> {
-        let conn = Connection::connect_to_env()
-            .map_err(|e| WaylandError::Connect(format!("{e}")))?;
-        let (globals, event_queue) = registry_queue_init(&conn)
-            .map_err(|e| WaylandError::Connect(format!("registry init: {e}")))?;
-        let qh: QueueHandle<AppState> = event_queue.handle();
-
-        let registry_state = RegistryState::new(&globals);
-        let output_state = OutputState::new(&globals, &qh);
-        let seat_state = SeatState::new(&globals, &qh);
-        let compositor_state = CompositorState::bind(&globals, &qh)
-            .map_err(|e| WaylandError::Bind(format!("compositor: {e}")))?;
-        let layer_shell = LayerShell::bind(&globals, &qh)
-            .map_err(|e| WaylandError::Bind(format!("wlr-layer-shell-unstable-v1: {e}")))?;
-        let shm = Shm::bind(&globals, &qh)
-            .map_err(|e| WaylandError::Bind(format!("wl_shm: {e}")))?;
-        let cursor_shape = CursorShapeManager::bind(&globals, &qh).ok();
-
-        let font = FontAtlas::load(config.font_path.as_deref(), config.cell_height_px as f32)
-            .map_err(|e| WaylandError::Font(format!("{e}")))?;
+        let (conn, event_queue, globals, qh, mut state) =
+            Self::bootstrap(config, producer_factory, should_exit)?;
 
         let LockConfig {
             theme,
@@ -229,47 +233,16 @@ impl WaylandRenderer {
             };
 
         let now = Instant::now();
-        let lock_state = LockState::new(state_config, now);
-
-        let mut state = AppState {
-            registry_state,
-            output_state,
-            seat_state,
-            shm,
-            compositor_state,
-            layer_shell,
-            qh: qh.clone(),
-            cursor_device: None,
-            cursor_shape,
-            pointer: None,
-            keyboard: None,
-            should_exit: Arc::clone(&should_exit),
-            input_dismissed: false,
-            idle_daemon: config.idle_daemon,
-            producer_factory,
-            font,
-            wallpaper_path: config.wallpaper_path,
-            wallpaper_dim: config.wallpaper_dim,
-            surfaces: Vec::new(),
-            is_lock_mode: true,
-            lock_binding: None,
-            lock_state: Some(lock_state),
-            dpms_manager: None,
-            theme: Some(theme),
-            widget_cache: Some(widget_cache),
-            theme_dirty: Some(theme_dirty),
-            authenticate: Some(authenticate),
-            username: Some(username),
-            prompt_password: String::new(),
-            prompt_capslock: false,
-            power_menu: PowerMenuState::default(),
-            error: None,
-            fingerprint_rx,
-            fingerprint_hint,
-            fingerprint_paused,
-            fingerprint_status: FingerprintStatus::Idle,
-        };
-        let _ = config.fps_cap;
+        state.is_lock_mode = true;
+        state.lock_state = Some(LockState::new(state_config, now));
+        state.theme = Some(theme);
+        state.widget_cache = Some(widget_cache);
+        state.theme_dirty = Some(theme_dirty);
+        state.authenticate = Some(authenticate);
+        state.username = Some(username);
+        state.fingerprint_rx = fingerprint_rx;
+        state.fingerprint_hint = fingerprint_hint;
+        state.fingerprint_paused = fingerprint_paused;
 
         let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
             .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
@@ -898,8 +871,8 @@ impl AppState {
         let greeting = self
             .username
             .as_ref()
-            .map(|n| format!("Hi, {n}"))
-            .unwrap_or_else(|| "Hi".to_string());
+            .map(|n| shedos_screensaver_i18n::t_str("lock-greeting", &[("name", n)]))
+            .unwrap_or_else(|| shedos_screensaver_i18n::t("lock-greeting-default"));
         let fingerprint = self.fingerprint_hint.as_deref().map(|idle_hint| {
             // Color + hint vary by post-attempt state so the user
             // sees feedback per scan.

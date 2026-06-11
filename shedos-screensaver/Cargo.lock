@@ -1669,6 +1669,7 @@ dependencies = [
  "image",
  "shedos-prompt-ui",
  "shedos-screensaver-core",
+ "shedos-screensaver-i18n",
  "smithay-client-toolkit",
  "wayland-client",
  "wayland-protocols",

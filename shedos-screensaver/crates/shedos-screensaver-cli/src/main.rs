@@ -526,35 +526,35 @@ fn run_tty(
 
 // ============= Wayland mode =============
 
-fn run_wayland(
-    cli: &Cli,
-    color_override: Option<Color>,
-    audio: Option<AudioCapture>,
-    exit_flag: Arc<std::sync::atomic::AtomicBool>,
-) -> Result<(), String> {
-    let wallpaper_path = resolve_wallpaper(&cli.wallpaper);
-    let cfg = WaylandConfig {
+fn wayland_config(cli: &Cli, wallpaper_path: Option<std::path::PathBuf>) -> WaylandConfig {
+    WaylandConfig {
         font_path: cli.font_path.clone(),
         cell_height_px: cli.cell_height_px,
         wallpaper_path,
         wallpaper_dim: cli.wallpaper_dim,
         fps_cap: cli.fps.unwrap_or(60).max(1),
         idle_daemon: cli.idle_daemon,
-    };
+    }
+}
 
-    // One producer per output. Captures below are clonable except
-    // `audio`, which owns a non-duplicable cpal Stream. The closure
-    // `take()`s the Option on first call; the first output gets
-    // audio-reactive effects, later outputs use the silence fallback.
+/// One producer per output. Captures are clonable except `audio`,
+/// which owns a non-duplicable cpal Stream: the closure `take()`s the
+/// Option on first call, so the first output gets audio-reactive
+/// effects and later outputs use the silence fallback.
+fn engine_producer_factory(
+    cli: &Cli,
+    color_override: Option<Color>,
+    audio: Option<AudioCapture>,
+    exit_flag: &Arc<std::sync::atomic::AtomicBool>,
+    duration: Option<f32>,
+) -> ProducerFactory {
     let logo = cli.logo.clone();
     let effect = cli.effect.clone();
     let cycle = cli.cycle.clone();
     let hold = Duration::from_secs_f32(cli.hold.max(0.0));
-    let duration = cli.duration;
-    let exit_for_factory = Arc::clone(&exit_flag);
+    let exit_for_factory = Arc::clone(exit_flag);
     let mut audio_one_shot = audio;
-
-    let factory: ProducerFactory = Box::new(move || {
+    Box::new(move || {
         Box::new(EngineProducer {
             engine: Engine::new(
                 logo.clone(),
@@ -572,7 +572,17 @@ fn run_wayland(
             duration,
             start: Duration::ZERO,
         }) as Box<dyn FrameProducer>
-    });
+    })
+}
+
+fn run_wayland(    cli: &Cli,
+    color_override: Option<Color>,
+    audio: Option<AudioCapture>,
+    exit_flag: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    let cfg = wayland_config(cli, resolve_wallpaper(&cli.wallpaper));
+    let factory =
+        engine_producer_factory(cli, color_override, audio, &exit_flag, cli.duration);
 
     if let Some(d) = cli.duration {
         let f = Arc::clone(&exit_flag);
@@ -596,46 +606,13 @@ fn run_lock(
     // Lock-mode Screensaver renders on solid Color::BASE so effects
     // read clearly without a wallpaper bleed. The Prompt-phase
     // wallpaper comes from the theme via WidgetCache.
-    let cfg = WaylandConfig {
-        font_path: cli.font_path.clone(),
-        cell_height_px: cli.cell_height_px,
-        wallpaper_path: None,
-        wallpaper_dim: cli.wallpaper_dim,
-        fps_cap: cli.fps.unwrap_or(60).max(1),
-        idle_daemon: cli.idle_daemon,
-    };
+    let cfg = wayland_config(cli, None);
 
-    let logo = cli.logo.clone();
-    let effect = cli.effect.clone();
-    let cycle = cli.cycle.clone();
-    let hold = Duration::from_secs_f32(cli.hold.max(0.0));
     // --duration must never auto-unlock a lock; ignore it.
     if cli.duration.is_some() {
         eprintln!("shedos-screensaver: --duration is ignored in lock mode");
     }
-    let duration: Option<f32> = None;
-    let exit_for_factory = Arc::clone(&exit_flag);
-    let mut audio_one_shot = audio;
-
-    let factory: ProducerFactory = Box::new(move || {
-        Box::new(EngineProducer {
-            engine: Engine::new(
-                logo.clone(),
-                effect.clone(),
-                cycle.clone(),
-                color_override,
-                hold,
-                audio_one_shot.take(),
-            ),
-            registry: EffectsRegistry::new(),
-            clock: RealClock::new(),
-            last_frame: Duration::ZERO,
-            first: true,
-            exit_flag: Arc::clone(&exit_for_factory),
-            duration,
-            start: Duration::ZERO,
-        }) as Box<dyn FrameProducer>
-    });
+    let factory = engine_producer_factory(cli, color_override, audio, &exit_flag, None);
 
     WaylandRenderer::run_locked(cfg, factory, exit_flag, lock_config)
         .map_err(|e| format!("lock: {e}"))

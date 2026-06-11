@@ -25,3 +25,7 @@ error-invalid-color = invalid color "{ $spec }"; expected #rrggbb, r,g,b, named 
 error-no-default-effect = no effect selected; pass --effect or accept the default (random each cycle).
 error-wayland-unavailable = Wayland mode requested but $WAYLAND_DISPLAY is not set; falling back to TTY.
 error-audio-unavailable = audio source "{ $source }" requested but pipewire is not reachable; running without audio reactivity.
+
+# Lock screen
+lock-greeting = Hi, { $name }
+lock-greeting-default = Hi

@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "Wayland-native fullscreen overlay renderer (wlr-layer-shell + wlr-shm)"
 
 [dependencies]
+shedos-screensaver-i18n.workspace = true
 shedos-prompt-ui.workspace = true
 shedos-screensaver-core.workspace = true
 smithay-client-toolkit.workspace = true
