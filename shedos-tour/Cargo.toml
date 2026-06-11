@@ -1,0 +1,26 @@
+[package]
+name = "shedos-tour"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "ShedOS first-run welcome tour overlay"
+repository = "https://github.com/Theshedman/shedos"
+publish = false
+
+[[bin]]
+name = "shedos-tour"
+path = "src/main.rs"
+
+[dependencies]
+shedos-prompt-ui = { path = "../shedos-prompt-ui" }
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1

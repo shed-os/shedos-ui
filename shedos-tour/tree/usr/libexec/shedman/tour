@@ -1,0 +1,12 @@
+#!/bin/bash
+# shedman tour; replay the first-run welcome tour.
+case "${1:-}" in
+    --help-summary) echo "replay the welcome tour overlay"; exit 0 ;;
+    --complete-bash|--complete-zsh) exit 0 ;;
+    --complete-fish) exit 0 ;;
+    -h|--help)
+        echo "Usage: shedman tour"
+        echo "Replays the first-run welcome tour (slides over the desktop)."
+        exit 0 ;;
+esac
+exec /usr/bin/shedos-tour

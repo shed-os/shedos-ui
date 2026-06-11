@@ -1,0 +1,62 @@
+# Maintainer: ShedOS <https://github.com/Theshedman/shedos>
+#
+# First-run welcome tour: a four-slide wlr-layer-shell overlay in the
+# same renderer family as shedos-greeter/power, shown once per user by
+# a stamp-gated user oneshot. `shedman tour` replays it.
+
+pkgname=shedos-tour
+pkgver=2026.05.17
+pkgrel=1
+pkgdesc='ShedOS first-run welcome tour overlay'
+arch=('x86_64')
+url='https://github.com/Theshedman/shedos'
+license=('GPL-3.0-or-later')
+
+depends=(
+    'gcc-libs'
+    'glibc'
+    'wayland'
+    'libxkbcommon'
+    'ttf-jetbrains-mono-nerd'
+    'shedos-system'
+)
+
+makedepends=(
+    'rust>=1.75'
+    'cargo'
+    'scdoc'
+)
+
+install=shedos-tour.install
+
+prepare() {
+    cd "$startdir"
+    install -d man/build
+    for src in man/*.scd; do
+        out=man/build/$(basename "${src%.scd}")
+        scdoc < "$src" > "$out"
+    done
+}
+
+build() {
+    cd "$startdir"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$startdir"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$startdir"
+
+    install -Dm755 target/release/shedos-tour \
+        "$pkgdir/usr/bin/shedos-tour"
+    install -Dm755 tree/usr/libexec/shedman/tour \
+        "$pkgdir/usr/libexec/shedman/tour"
+    install -Dm644 tree/usr/lib/systemd/user/shedos-tour.service \
+        "$pkgdir/usr/lib/systemd/user/shedos-tour.service"
+    install -Dm644 man/build/shedos-tour.1 \
+        "$pkgdir/usr/share/man/man1/shedos-tour.1"
+}

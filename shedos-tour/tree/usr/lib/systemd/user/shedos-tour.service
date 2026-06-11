@@ -1,0 +1,19 @@
+[Unit]
+Description=ShedOS first-run welcome tour
+# Shown once per user: the stamp survives Esc too — skipping is an
+# answer. `shedman tour` reruns it on demand.
+ConditionPathExists=!%h/.local/state/shedos/tour-shown
+After=graphical-session.target waybar.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+# Let the bar and wallpaper land first so the backdrop has something
+# to dim; the overlay grabs the keyboard either way.
+ExecStartPre=/usr/bin/sleep 2
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/shedos
+ExecStart=/usr/bin/shedos-tour
+ExecStartPost=/usr/bin/touch %h/.local/state/shedos/tour-shown
+
+[Install]
+WantedBy=graphical-session.target
