@@ -6,7 +6,7 @@
 
 pkgname=shedos-tour
 pkgver=2026.05.17
-pkgrel=1
+pkgrel=2
 pkgdesc='ShedOS first-run welcome tour overlay'
 arch=('x86_64')
 url='https://github.com/Theshedman/shedos'
