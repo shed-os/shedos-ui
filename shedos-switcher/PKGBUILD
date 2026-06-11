@@ -1,0 +1,56 @@
+# Maintainer: ShedOS <https://github.com/Theshedman/shedos>
+#
+# The Alt-Tab switcher: MRU window strip with real app icons,
+# hold-Alt/release-to-switch semantics. Same renderer family as
+# shedos-greeter/power/tour.
+
+pkgname=shedos-switcher
+pkgver=2026.05.17
+pkgrel=1
+pkgdesc='ShedOS Alt-Tab window switcher overlay'
+arch=('x86_64')
+url='https://github.com/Theshedman/shedos'
+license=('GPL-3.0-or-later')
+
+depends=(
+    'gcc-libs'
+    'glibc'
+    'wayland'
+    'libxkbcommon'
+    'ttf-jetbrains-mono-nerd'
+    'hyprland'
+)
+
+makedepends=(
+    'rust>=1.75'
+    'cargo'
+    'scdoc'
+)
+
+prepare() {
+    cd "$startdir"
+    install -d man/build
+    for src in man/*.scd; do
+        out=man/build/$(basename "${src%.scd}")
+        scdoc < "$src" > "$out"
+    done
+}
+
+build() {
+    cd "$startdir"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$startdir"
+    cargo test --release --locked
+}
+
+package() {
+    cd "$startdir"
+
+    install -Dm755 target/release/shedos-switcher \
+        "$pkgdir/usr/bin/shedos-switcher"
+    install -Dm644 man/build/shedos-switcher.1 \
+        "$pkgdir/usr/share/man/man1/shedos-switcher.1"
+}

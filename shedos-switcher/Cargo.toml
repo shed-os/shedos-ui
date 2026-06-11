@@ -1,0 +1,29 @@
+[package]
+name = "shedos-switcher"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "ShedOS Alt-Tab window switcher overlay"
+repository = "https://github.com/Theshedman/shedos"
+publish = false
+
+[[bin]]
+name = "shedos-switcher"
+path = "src/main.rs"
+
+[dependencies]
+shedos-prompt-ui = { path = "../shedos-prompt-ui" }
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
