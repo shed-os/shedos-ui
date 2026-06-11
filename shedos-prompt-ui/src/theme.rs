@@ -23,6 +23,12 @@ pub struct Theme {
     pub text: u32,
     pub accent: u32,
     pub red: u32,
+    pub accent_secondary: u32,
+    pub yellow: u32,
+    pub mantle: u32,
+    pub surface0: u32,
+    pub surface2: u32,
+    pub overlay1: u32,
     /// Wordmark variant for dark backgrounds (blue "Shed" + white "os").
     pub wordmark_on_dark: PathBuf,
     /// Wordmark variant for light backgrounds (blue "Shed" + black "os").
@@ -50,6 +56,12 @@ struct GreeterColors {
     text: Option<String>,
     accent: Option<String>,
     red: Option<String>,
+    accent_secondary: Option<String>,
+    yellow: Option<String>,
+    mantle: Option<String>,
+    surface0: Option<String>,
+    surface2: Option<String>,
+    overlay1: Option<String>,
 }
 
 impl Theme {
@@ -69,6 +81,12 @@ impl Theme {
             text: 0xFFCDD6F4,
             accent: 0xFF89B4FA,
             red: 0xFFF38BA8,
+            accent_secondary: 0xFFCBA6F7,
+            yellow: 0xFFF9E2AF,
+            mantle: 0xFF181825,
+            surface0: 0xFF313244,
+            surface2: 0xFF585B70,
+            overlay1: 0xFF7F849C,
             wordmark_on_dark: PathBuf::from(
                 "/usr/share/shedos/shedos-wordmark-on-dark.png",
             ),
@@ -151,6 +169,28 @@ impl Theme {
             text: parse_hex_or_fallback("text", colors.text.as_deref(), fb.text),
             accent: parse_hex_or_fallback("accent", colors.accent.as_deref(), fb.accent),
             red: parse_hex_or_fallback("red", colors.red.as_deref(), fb.red),
+            accent_secondary: parse_hex_or_fallback(
+                "accent_secondary",
+                colors.accent_secondary.as_deref(),
+                fb.accent_secondary,
+            ),
+            yellow: parse_hex_or_fallback("yellow", colors.yellow.as_deref(), fb.yellow),
+            mantle: parse_hex_or_fallback("mantle", colors.mantle.as_deref(), fb.mantle),
+            surface0: parse_hex_or_fallback(
+                "surface0",
+                colors.surface0.as_deref(),
+                fb.surface0,
+            ),
+            surface2: parse_hex_or_fallback(
+                "surface2",
+                colors.surface2.as_deref(),
+                fb.surface2,
+            ),
+            overlay1: parse_hex_or_fallback(
+                "overlay1",
+                colors.overlay1.as_deref(),
+                fb.overlay1,
+            ),
             wordmark_on_dark: fb.wordmark_on_dark.clone(),
             wordmark_on_light: fb.wordmark_on_light.clone(),
         }

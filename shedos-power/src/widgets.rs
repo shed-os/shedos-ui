@@ -47,28 +47,60 @@ impl Action {
     }
     pub fn action_color(self) -> (u8, u8, u8) {
         match self {
-            Action::Lock => BLUE,
-            Action::Suspend => MAUVE,
-            Action::Restart => YELLOW,
-            Action::Shutdown => CORAL,
+            Action::Lock => palette().blue,
+            Action::Suspend => palette().mauve,
+            Action::Restart => palette().yellow,
+            Action::Shutdown => palette().coral,
         }
     }
 }
 
-// Catppuccin Mocha palette as used in the approved mockups.
-const TEXT: (u8, u8, u8) = (0xcd, 0xd6, 0xf4);
-const MUTED: (u8, u8, u8) = (0x7f, 0x84, 0x9c);
-const CARD_BG: (u8, u8, u8) = (0x18, 0x18, 0x25);
-const CARD_BORDER: (u8, u8, u8) = (0x45, 0x47, 0x5a);
-const ROW_BG: (u8, u8, u8) = (0x31, 0x32, 0x44);
-const DARK_TEXT: (u8, u8, u8) = (0x1e, 0x1e, 0x2e);
-const BACKDROP_RGB: (u8, u8, u8) = (0x1e, 0x1e, 0x2e);
-const BACKDROP_ALPHA: u8 = 0xb3; // 0.7
+// Colors come from the live theme (greeter.toml via prompt-ui's
+// Theme); the load_or_default fallback is the Catppuccin Mocha set
+// the mockups were approved with. The roles keep the mockups' names.
+pub struct Palette {
+    pub text: (u8, u8, u8),
+    pub muted: (u8, u8, u8),
+    pub card_bg: (u8, u8, u8),
+    pub card_border: (u8, u8, u8),
+    pub row_bg: (u8, u8, u8),
+    pub dark_text: (u8, u8, u8),
+    pub backdrop_rgb: (u8, u8, u8),
+    pub blue: (u8, u8, u8),
+    pub mauve: (u8, u8, u8),
+    pub yellow: (u8, u8, u8),
+    pub coral: (u8, u8, u8),
+}
 
-const BLUE: (u8, u8, u8) = (0x89, 0xb4, 0xfa);
-const MAUVE: (u8, u8, u8) = (0xcb, 0xa6, 0xf7);
-const YELLOW: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
-const CORAL: (u8, u8, u8) = (0xf3, 0x8b, 0xa8);
+fn rgb(argb: u32) -> (u8, u8, u8) {
+    (
+        ((argb >> 16) & 0xff) as u8,
+        ((argb >> 8) & 0xff) as u8,
+        (argb & 0xff) as u8,
+    )
+}
+
+pub fn palette() -> &'static Palette {
+    static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+    PALETTE.get_or_init(|| {
+        let t = shedos_prompt_ui::Theme::load_or_default();
+        Palette {
+            text: rgb(t.text),
+            muted: rgb(t.overlay1),
+            card_bg: rgb(t.mantle),
+            card_border: rgb(t.surface2),
+            row_bg: rgb(t.surface0),
+            dark_text: rgb(t.base),
+            backdrop_rgb: rgb(t.base),
+            blue: rgb(t.accent),
+            mauve: rgb(t.accent_secondary),
+            yellow: rgb(t.yellow),
+            coral: rgb(t.red),
+        }
+    })
+}
+
+const BACKDROP_ALPHA: u8 = 0xb3; // 0.7
 
 // Card dimensions. Menu and confirm cards are the same width so the
 // swap looks like one stage with new content, not two different cards.
@@ -419,9 +451,9 @@ fn fill_backdrop(canvas: &mut [u8], w: u32, h: u32, alpha: u8) {
     // wl_shm Argb8888 with straight alpha: write RGB unmultiplied,
     // alpha into the alpha byte. Compositor blends against what's
     // behind (the wallpaper).
-    let r = BACKDROP_RGB.0;
-    let g = BACKDROP_RGB.1;
-    let b = BACKDROP_RGB.2;
+    let r = palette().backdrop_rgb.0;
+    let g = palette().backdrop_rgb.1;
+    let b = palette().backdrop_rgb.2;
     let pixels = (w as usize) * (h as usize);
     for i in 0..pixels {
         let off = i * 4;
@@ -454,7 +486,7 @@ fn paint_menu(
     let card_alpha = scale_alpha(group_alpha, 0xff);
     draw_rounded_box(
         canvas, canvas_w, canvas_h, cx, cy, cw, ch, CARD_RADIUS, CARD_BORDER_PX,
-        CARD_BG, card_alpha, CARD_BORDER, card_alpha,
+        palette().card_bg, card_alpha, palette().card_border, card_alpha,
     );
 
     // POWER label.
@@ -468,7 +500,7 @@ fn paint_menu(
     };
     let label_alpha = scale_alpha(group_alpha * label_open, 0xb3);
     regular.render(
-        label, POWER_LABEL_PX, label_x, label_y, TEXT, label_alpha, canvas, canvas_w, canvas_h,
+        label, POWER_LABEL_PX, label_x, label_y, palette().text, label_alpha, canvas, canvas_w, canvas_h,
     );
 
     // Rows.
@@ -507,10 +539,10 @@ fn paint_menu_row(
     let (rx, ry, rw, rh) = menu_row_rect(canvas_w, canvas_h, row);
 
     let (fill, label_color, glyph_color, weight_bold) = match action {
-        Action::Shutdown => (CORAL, DARK_TEXT, DARK_TEXT, true),
-        _ => (ROW_BG, TEXT, TEXT, false),
+        Action::Shutdown => (palette().coral, palette().dark_text, palette().dark_text, true),
+        _ => (palette().row_bg, palette().text, palette().text, false),
     };
-    let border = if focused { TEXT } else { fill };
+    let border = if focused { palette().text } else { fill };
     let border_thick = if focused { 1 } else { 0 };
 
     draw_rounded_box(
@@ -571,7 +603,7 @@ fn paint_confirming(
     let alpha = scale_alpha(group_alpha, 0xff);
     draw_rounded_box(
         canvas, canvas_w, canvas_h, cx, cy, cw, ch, CARD_RADIUS, CARD_BORDER_PX,
-        CARD_BG, alpha, CARD_BORDER, alpha,
+        palette().card_bg, alpha, palette().card_border, alpha,
     );
 
     let inner_x = cx + CARD_PAD_X;
@@ -603,7 +635,7 @@ fn paint_confirming(
         QUESTION_PX,
         canvas_cx - q_w / 2,
         q_baseline,
-        TEXT,
+        palette().text,
         alpha,
         canvas,
         canvas_w,
@@ -619,7 +651,7 @@ fn paint_confirming(
         CONSEQUENCE_PX,
         canvas_cx - c_w / 2,
         c_baseline,
-        MUTED,
+        palette().muted,
         alpha,
         canvas,
         canvas_w,
@@ -632,14 +664,14 @@ fn paint_confirming(
     let (commit_x, commit_y, commit_w, commit_h) =
         confirm_button_rect(canvas_w, canvas_h, ConfirmFocus::Commit);
 
-    // Cancel: ROW_BG fill, TEXT label.
+    // Cancel: palette().row_bg fill, palette().text label.
     let cancel_focused = focus == ConfirmFocus::Cancel;
     draw_rounded_box(
         canvas, canvas_w, canvas_h,
         cancel_x, cancel_y, cancel_w, cancel_h, BUTTON_RADIUS,
         if cancel_focused { 1 } else { 0 },
-        ROW_BG, alpha,
-        TEXT, alpha,
+        palette().row_bg, alpha,
+        palette().text, alpha,
     );
     let cancel_text = "Cancel";
     let ct_w = regular.measure_width(cancel_text, BUTTON_PX);
@@ -650,21 +682,21 @@ fn paint_confirming(
         BUTTON_PX,
         ct_x,
         ct_y,
-        TEXT,
+        palette().text,
         alpha,
         canvas,
         canvas_w,
         canvas_h,
     );
 
-    // Commit: action-color fill, DARK_TEXT label, bold weight.
+    // Commit: action-color fill, palette().dark_text label, bold weight.
     let commit_focused = focus == ConfirmFocus::Commit;
     draw_rounded_box(
         canvas, canvas_w, canvas_h,
         commit_x, commit_y, commit_w, commit_h, BUTTON_RADIUS,
         if commit_focused { 1 } else { 0 },
         action.action_color(), alpha,
-        TEXT, alpha,
+        palette().text, alpha,
     );
     let commit_text = action.confirm_button();
     let bt_w = bold.measure_width(commit_text, BUTTON_PX);
@@ -675,7 +707,7 @@ fn paint_confirming(
         BUTTON_PX,
         bt_x,
         bt_y,
-        DARK_TEXT,
+        palette().dark_text,
         alpha,
         canvas,
         canvas_w,
