@@ -13,6 +13,9 @@ pkgdesc='Animated screensaver: TTY + Wayland backends, 8 styles, audio-reactive'
 arch=('x86_64')
 url='https://github.com/Theshedman/shedos'
 license=('GPL-3.0-or-later')
+optdepends=(
+    'fprintd: fingerprint unlock at the lock screen (pam_fprintd.so)'
+)
 install=shedos-screensaver.install
 depends=(
     'gcc-libs'              # rust runtime
@@ -24,7 +27,6 @@ depends=(
     'ttf-jetbrains-mono-nerd' # shedos-prompt-ui clock + power glyph font (lock prompt)
     'alsa-lib'              # cpal -> ALSA -> pipewire-alsa loopback (audio capture)
     'pam'                   # libpam for --mode=lock authentication
-    'fprintd'               # pam_fprintd.so for fingerprint unlock at the lock screen
 )
 conflicts=('hyprlock')
 makedepends=(

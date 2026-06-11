@@ -1,6 +1,6 @@
 //! PAM password verification for `--mode=lock`.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use pam::{Client, Conversation, PamReturnCode};
 use shedos_screensaver_wayland::calloop_ping::Ping;
 use std::ffi::{CStr, CString};
@@ -189,6 +189,19 @@ pub fn spawn_fingerprint_auth_loop(
 }
 
 pub fn current_username() -> Result<String> {
+    // getpwuid first: this name feeds PAM, and the environment is
+    // attacker-influencable in ways the password database is not
+    // (a stale or spoofed $USER would aim the auth at someone else).
+    let uid = unsafe { libc::getuid() };
+    let pw = unsafe { libc::getpwuid(uid) };
+    if !pw.is_null() {
+        let name = unsafe { CStr::from_ptr((*pw).pw_name) };
+        if let Ok(s) = name.to_str() {
+            if !s.is_empty() {
+                return Ok(s.to_owned());
+            }
+        }
+    }
     for var in ["USER", "LOGNAME"] {
         if let Ok(v) = std::env::var(var) {
             if !v.is_empty() {
@@ -196,13 +209,5 @@ pub fn current_username() -> Result<String> {
             }
         }
     }
-    let uid = unsafe { libc::getuid() };
-    let pw = unsafe { libc::getpwuid(uid) };
-    if pw.is_null() {
-        return Err(anyhow!("cannot resolve current uid {} via getpwuid", uid));
-    }
-    let name = unsafe { CStr::from_ptr((*pw).pw_name) };
-    name.to_str()
-        .map(|s| s.to_owned())
-        .context("pw_name is not valid UTF-8")
+    Err(anyhow!("cannot resolve current uid {} via getpwuid or env", uid))
 }
