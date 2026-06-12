@@ -7,18 +7,45 @@ use shedos_prompt_ui::text::FontFace;
 pub enum Action {
     Lock,
     Suspend,
+    Hibernate,
     Restart,
     Shutdown,
 }
 
+/// Hibernate only appears when this kernel can actually do it: disk
+/// state supported and a resume target configured (/sys/power/resume
+/// is "0:0" until resume= takes effect, i.e. the reboot after the
+/// hibernation backfill). No-swap machines keep the four actions.
+fn hibernate_available() -> bool {
+    let state = std::fs::read_to_string("/sys/power/state").unwrap_or_default();
+    if !state.split_whitespace().any(|s| s == "disk") {
+        return false;
+    }
+    let resume = std::fs::read_to_string("/sys/power/resume").unwrap_or_default();
+    let resume = resume.trim();
+    !resume.is_empty() && resume != "0:0"
+}
+
+fn actions_for(hibernate: bool) -> Vec<Action> {
+    let mut v = vec![Action::Lock, Action::Suspend];
+    if hibernate {
+        v.push(Action::Hibernate);
+    }
+    v.push(Action::Restart);
+    v.push(Action::Shutdown);
+    v
+}
+
 impl Action {
-    pub fn all() -> [Action; 4] {
-        [Action::Lock, Action::Suspend, Action::Restart, Action::Shutdown]
+    pub fn all() -> &'static [Action] {
+        static ACTIONS: std::sync::OnceLock<Vec<Action>> = std::sync::OnceLock::new();
+        ACTIONS.get_or_init(|| actions_for(hibernate_available()))
     }
     pub fn label(self) -> &'static str {
         match self {
             Action::Lock => "Lock screen",
             Action::Suspend => "Sleep",
+            Action::Hibernate => "Hibernate",
             Action::Restart => "Reboot",
             Action::Shutdown => "Shut down",
         }
@@ -27,20 +54,25 @@ impl Action {
         match self {
             Action::Lock => '\u{F023}',
             Action::Suspend => '\u{F186}',
+            Action::Hibernate => '\u{F236}',
             Action::Restart => '\u{F021}',
             Action::Shutdown => '\u{F011}',
         }
     }
     pub fn confirm_question(self) -> &'static str {
         match self {
-            Action::Lock | Action::Suspend => "",
+            Action::Lock => "",
+            Action::Suspend => "Sleep?",
+            Action::Hibernate => "Hibernate?",
             Action::Restart => "Reboot?",
             Action::Shutdown => "Shut down?",
         }
     }
     pub fn confirm_button(self) -> &'static str {
         match self {
-            Action::Lock | Action::Suspend => "",
+            Action::Lock => "",
+            Action::Suspend => "Sleep",
+            Action::Hibernate => "Hibernate",
             Action::Restart => "Reboot",
             Action::Shutdown => "Shut down",
         }
@@ -49,6 +81,7 @@ impl Action {
         match self {
             Action::Lock => palette().blue,
             Action::Suspend => palette().mauve,
+            Action::Hibernate => palette().mauve,
             Action::Restart => palette().yellow,
             Action::Shutdown => palette().coral,
         }
@@ -219,7 +252,7 @@ impl PowerState {
     pub fn tick(&mut self, now: Instant) -> bool {
         let dt = now.duration_since(self.phase_started_at).as_millis() as u32;
         match self.phase {
-            Phase::Opening if dt >= 4 * OPEN_ROW_OFFSET_MS + OPEN_FADE_MS => {
+            Phase::Opening if dt >= Action::all().len() as u32 * OPEN_ROW_OFFSET_MS + OPEN_FADE_MS => {
                 self.phase = Phase::Menu;
                 true
             }
@@ -468,6 +501,7 @@ fn scale_alpha(group: f32, base: u8) -> u8 {
     (group.clamp(0.0, 1.0) * base as f32) as u8
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_menu(
     canvas: &mut [u8],
     canvas_w: u32,
@@ -525,6 +559,7 @@ fn paint_menu(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_menu_row(
     canvas: &mut [u8],
     canvas_w: u32,
@@ -589,6 +624,7 @@ fn paint_menu_row(
     let _ = ROW_PAD_X;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_confirming(
     canvas: &mut [u8],
     canvas_w: u32,
@@ -725,6 +761,7 @@ pub fn dispatch_action(action: Action) -> std::io::Result<std::process::Child> {
     match action {
         Action::Lock => Command::new("loginctl").arg("lock-session").spawn(),
         Action::Suspend => Command::new("systemctl").arg("suspend").spawn(),
+        Action::Hibernate => Command::new("systemctl").arg("hibernate").spawn(),
         Action::Restart => Command::new("systemctl").arg("reboot").spawn(),
         Action::Shutdown => Command::new("systemctl").arg("poweroff").spawn(),
     }
@@ -777,14 +814,32 @@ mod tests {
     }
 
     #[test]
+    fn action_list_shapes() {
+        assert_eq!(
+            actions_for(false),
+            vec![Action::Lock, Action::Suspend, Action::Restart, Action::Shutdown]
+        );
+        assert_eq!(
+            actions_for(true),
+            vec![
+                Action::Lock,
+                Action::Suspend,
+                Action::Hibernate,
+                Action::Restart,
+                Action::Shutdown
+            ]
+        );
+    }
+
+    #[test]
     fn copy_matches_the_confirmation_contract() {
-        for a in Action::all() {
+        for a in actions_for(true) {
             assert!(!a.label().is_empty());
-            let destructive = matches!(a, Action::Restart | Action::Shutdown);
-            // Non-destructive actions commit without a confirm step,
-            // so only destructive ones need confirm copy.
-            assert_eq!(!a.confirm_question().is_empty(), destructive);
-            assert_eq!(!a.confirm_button().is_empty(), destructive);
+            // Everything except Lock confirms before acting — Lock is
+            // the one action that's trivially reversible.
+            let confirms = !matches!(a, Action::Lock);
+            assert_eq!(!a.confirm_question().is_empty(), confirms);
+            assert_eq!(!a.confirm_button().is_empty(), confirms);
         }
     }
 }

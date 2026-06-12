@@ -7,25 +7,47 @@ use crate::OutputRect;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerAction {
     Suspend,
+    Hibernate,
     Restart,
     Shutdown,
+}
+
+/// Hibernate only appears when the kernel can do it: disk state
+/// supported and a resume target configured (/sys/power/resume stays
+/// "0:0" until resume= takes effect).
+fn hibernate_available() -> bool {
+    let state = std::fs::read_to_string("/sys/power/state").unwrap_or_default();
+    if !state.split_whitespace().any(|s| s == "disk") {
+        return false;
+    }
+    let resume = std::fs::read_to_string("/sys/power/resume").unwrap_or_default();
+    let resume = resume.trim();
+    !resume.is_empty() && resume != "0:0"
+}
+
+fn actions_for(hibernate: bool) -> Vec<PowerAction> {
+    let mut v = vec![PowerAction::Suspend];
+    if hibernate {
+        v.push(PowerAction::Hibernate);
+    }
+    v.push(PowerAction::Restart);
+    v.push(PowerAction::Shutdown);
+    v
 }
 
 impl PowerAction {
     pub fn label(self) -> &'static str {
         match self {
             Self::Suspend => "Sleep",
+            Self::Hibernate => "Hibernate",
             Self::Restart => "Restart",
             Self::Shutdown => "Shut down",
         }
     }
 
     pub fn all() -> &'static [PowerAction] {
-        &[
-            PowerAction::Suspend,
-            PowerAction::Restart,
-            PowerAction::Shutdown,
-        ]
+        static ACTIONS: std::sync::OnceLock<Vec<PowerAction>> = std::sync::OnceLock::new();
+        ACTIONS.get_or_init(|| actions_for(hibernate_available()))
     }
 }
 
@@ -150,10 +172,19 @@ mod tests {
     }
 
     #[test]
-    fn actions_are_suspend_restart_shutdown() {
+    fn action_list_shapes() {
         assert_eq!(
-            PowerAction::all(),
-            &[PowerAction::Suspend, PowerAction::Restart, PowerAction::Shutdown]
+            actions_for(false),
+            vec![PowerAction::Suspend, PowerAction::Restart, PowerAction::Shutdown]
+        );
+        assert_eq!(
+            actions_for(true),
+            vec![
+                PowerAction::Suspend,
+                PowerAction::Hibernate,
+                PowerAction::Restart,
+                PowerAction::Shutdown
+            ]
         );
     }
 
@@ -188,15 +219,16 @@ mod tests {
 
     #[test]
     fn select_wraps() {
+        let n = PowerAction::all().len();
         let mut st = PowerMenuState::default();
         assert_eq!(st.selected, 0);
-        st.select_next();
-        assert_eq!(st.selected, 1);
-        st.select_next();
-        assert_eq!(st.selected, 2);
+        for i in 1..n {
+            st.select_next();
+            assert_eq!(st.selected, i);
+        }
         st.select_next();
         assert_eq!(st.selected, 0, "wraps past the last action");
         st.select_prev();
-        assert_eq!(st.selected, 2, "wraps backward to the last action");
+        assert_eq!(st.selected, n - 1, "wraps backward to the last action");
     }
 }

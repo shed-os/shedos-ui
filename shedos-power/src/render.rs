@@ -241,10 +241,12 @@ impl App {
     fn activate(&mut self, action: Action) {
         match action {
             // Lock and Sleep are non-destructive; no confirmation step.
-            Action::Lock | Action::Suspend => {
+            // Lock is trivially reversible; everything else gets the
+            // confirm card — sleep/hibernate interrupt work too.
+            Action::Lock => {
                 self.commit_action(action);
             }
-            Action::Restart | Action::Shutdown => {
+            Action::Suspend | Action::Hibernate | Action::Restart | Action::Shutdown => {
                 self.state.enter_confirming(action);
                 self.draw();
             }
@@ -518,7 +520,7 @@ impl PointerHandler for App {
                 PointerEventKind::Leave { .. } => {
                     self.pointer_pos = None;
                 }
-                PointerEventKind::Press { button, .. } if button == 0x110 => {
+                PointerEventKind::Press { button: 0x110, .. } => {
                     click = Some((e.position.0 as f32, e.position.1 as f32));
                 }
                 _ => {}

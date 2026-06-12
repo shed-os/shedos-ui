@@ -11,6 +11,7 @@ use crate::{OutputRect, PromptState};
 const POWER_GLYPH: char = '\u{F011}';
 const RESTART_GLYPH: char = '\u{F021}';
 const SLEEP_GLYPH: char = '\u{F186}';
+const HIBERNATE_GLYPH: char = '\u{F236}';
 
 const CLOCK_PX: f32 = 120.0;
 const DATE_PX: f32 = 24.0;
@@ -315,6 +316,7 @@ fn menu_icon_for(action: crate::PowerAction) -> char {
     use crate::PowerAction::*;
     match action {
         Suspend => SLEEP_GLYPH,
+        Hibernate => HIBERNATE_GLYPH,
         Restart => RESTART_GLYPH,
         Shutdown => POWER_GLYPH,
     }
