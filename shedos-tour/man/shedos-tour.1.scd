@@ -10,7 +10,7 @@ shedos-tour - first-run welcome tour overlay
 
 # DESCRIPTION
 
-A four-slide overlay shown on the first login: the Super-key
+A six-slide overlay shown on the first login: the Super-key
 essentials, the touchpad gestures, *shedman* in thirty seconds, and
 the safety story (snapshots, rollback, boot auto-recovery). Arrow
 keys or clicks navigate; *Esc* skips; *Enter* on the last slide

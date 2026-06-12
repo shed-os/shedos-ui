@@ -1,6 +1,6 @@
 # Maintainer: ShedOS <https://github.com/Theshedman/shedos>
 #
-# First-run welcome tour: a four-slide wlr-layer-shell overlay in the
+# First-run welcome tour: a six-slide wlr-layer-shell overlay in the
 # same renderer family as shedos-greeter/power, shown once per user by
 # a stamp-gated user oneshot. `shedman tour` replays it.
 
