@@ -729,3 +729,62 @@ pub fn dispatch_action(action: Action) -> std::io::Result<std::process::Child> {
         Action::Shutdown => Command::new("systemctl").arg("poweroff").spawn(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn menu_cursor_wraps_both_directions() {
+        let mut s = PowerState::new();
+        let n = Action::all().len() as i32;
+        s.move_menu(-1);
+        assert_eq!(s.focus_menu as i32, n - 1, "up from 0 wraps to last");
+        s.move_menu(1);
+        assert_eq!(s.focus_menu, 0, "down from last wraps to 0");
+    }
+
+    #[test]
+    fn confirm_round_trip_preserves_action() {
+        let mut s = PowerState::new();
+        s.enter_confirming(Action::Shutdown);
+        assert_eq!(s.action, Some(Action::Shutdown));
+        assert!(matches!(s.phase, Phase::SwapToConfirm | Phase::Confirming));
+        s.enter_menu();
+        assert!(matches!(s.phase, Phase::SwapToMenu | Phase::Menu | Phase::Opening));
+    }
+
+    #[test]
+    fn toggle_confirm_flips_focus() {
+        let mut s = PowerState::new();
+        s.enter_confirming(Action::Restart);
+        let before = s.focus_confirm;
+        s.toggle_confirm();
+        assert_ne!(s.focus_confirm, before);
+        s.toggle_confirm();
+        assert_eq!(s.focus_confirm, before);
+    }
+
+    #[test]
+    fn dismiss_completes_after_animation() {
+        let mut s = PowerState::new();
+        s.enter_dismiss();
+        assert!(s.is_dismissing());
+        assert!(!s.dismiss_done(Instant::now()));
+        let later = Instant::now() + std::time::Duration::from_secs(1);
+        assert!(s.dismiss_done(later));
+    }
+
+    #[test]
+    fn copy_matches_the_confirmation_contract() {
+        for a in Action::all() {
+            assert!(!a.label().is_empty());
+            let destructive = matches!(a, Action::Restart | Action::Shutdown);
+            // Non-destructive actions commit without a confirm step,
+            // so only destructive ones need confirm copy.
+            assert_eq!(!a.confirm_question().is_empty(), destructive);
+            assert_eq!(!a.confirm_button().is_empty(), destructive);
+        }
+    }
+}

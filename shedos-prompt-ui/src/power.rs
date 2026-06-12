@@ -150,8 +150,11 @@ mod tests {
     }
 
     #[test]
-    fn actions_are_restart_then_shutdown() {
-        assert_eq!(PowerAction::all(), &[PowerAction::Restart, PowerAction::Shutdown]);
+    fn actions_are_suspend_restart_shutdown() {
+        assert_eq!(
+            PowerAction::all(),
+            &[PowerAction::Suspend, PowerAction::Restart, PowerAction::Shutdown]
+        );
     }
 
     #[test]
@@ -172,7 +175,7 @@ mod tests {
         let st = PowerMenuState { open: true, ..Default::default() };
         let (mx, my) = menu_origin(&rect());
         let hit = hit_test(&st, &[rect()], (mx + MENU_W as i32 / 2) as f32, (my + ITEM_H / 2) as f32);
-        assert_eq!(hit, PowerHit::Item(PowerAction::Restart));
+        assert_eq!(hit, PowerHit::Item(PowerAction::Suspend));
     }
 
     #[test]
@@ -190,8 +193,10 @@ mod tests {
         st.select_next();
         assert_eq!(st.selected, 1);
         st.select_next();
-        assert_eq!(st.selected, 0);
+        assert_eq!(st.selected, 2);
+        st.select_next();
+        assert_eq!(st.selected, 0, "wraps past the last action");
         st.select_prev();
-        assert_eq!(st.selected, 1);
+        assert_eq!(st.selected, 2, "wraps backward to the last action");
     }
 }
