@@ -96,6 +96,15 @@ use wayland_protocols_wlr::output_power_management::v1::client::{
 /// hotplug. Use `take()`-able captures for single-instance resources.
 pub type ProducerFactory = Box<dyn FnMut() -> Box<dyn FrameProducer>>;
 
+/// The handles `bootstrap` hands back to its two entry points.
+type BootstrapState = (
+    Connection,
+    wayland_client::EventQueue<AppState>,
+    wayland_client::globals::GlobalList,
+    QueueHandle<AppState>,
+    AppState,
+);
+
 /// Renderer entry point. One layer surface + frame producer per
 /// wl_output the compositor advertises.
 pub struct WaylandRenderer;
@@ -108,16 +117,7 @@ impl WaylandRenderer {
         config: WaylandConfig,
         producer_factory: ProducerFactory,
         should_exit: Arc<AtomicBool>,
-    ) -> Result<
-        (
-            Connection,
-            wayland_client::EventQueue<AppState>,
-            wayland_client::globals::GlobalList,
-            QueueHandle<AppState>,
-            AppState,
-        ),
-        WaylandError,
-    > {
+    ) -> Result<BootstrapState, WaylandError> {
         let conn = Connection::connect_to_env()
             .map_err(|e| WaylandError::Connect(format!("{e}")))?;
         let (globals, event_queue) = registry_queue_init(&conn)
@@ -1343,13 +1343,11 @@ impl PointerHandler for AppState {
                 .iter()
                 .position(|s| s.shell.wl_surface() == &e.surface);
             match e.kind {
-                PointerEventKind::Enter { .. } => {
-                    if surface_idx.is_some() {
-                        self.power_menu.pointer =
-                            Some((e.position.0 as f32, e.position.1 as f32));
-                        if self.power_menu.open {
-                            dirty = true;
-                        }
+                PointerEventKind::Enter { .. } if surface_idx.is_some() => {
+                    self.power_menu.pointer =
+                        Some((e.position.0 as f32, e.position.1 as f32));
+                    if self.power_menu.open {
+                        dirty = true;
                     }
                 }
                 PointerEventKind::Motion { .. } => {
@@ -1382,7 +1380,7 @@ impl PointerHandler for AppState {
                         dirty = true;
                     }
                 }
-                PointerEventKind::Press { button, .. } if button == 0x110 => {
+                PointerEventKind::Press { button: 0x110, .. } => {
                     if let Some(idx) = surface_idx {
                         press_at = Some((idx, e.position.0 as f32, e.position.1 as f32));
                     }
