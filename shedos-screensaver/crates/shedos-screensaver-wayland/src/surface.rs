@@ -305,8 +305,6 @@ impl WaylandRenderer {
             ));
         }
         touch_lock_sentinel();
-        // Serial marker for the boot harness: the compositor accepted the
-        // lock and our surfaces are up. Pairs with the "unlocked" line below.
         eprintln!("shedos-screensaver: locked");
 
         let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
@@ -1212,9 +1210,7 @@ impl KeyboardHandler for AppState {
             self.on_phase_change(from, to);
         }
 
-        // Live ISO: any key unlocks, no password. The transition above
-        // already moved Screensaver/Dpms -> Prompt; here we unlock in the
-        // same frame rather than route the key into the password buffer.
+        // Live ISO: any key unlocks without a password.
         if self.no_auth {
             self.mark_authenticated();
             self.mark_all_dirty();

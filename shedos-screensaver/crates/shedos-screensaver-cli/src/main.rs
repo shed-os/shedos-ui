@@ -618,9 +618,8 @@ fn run_lock(
         .map_err(|e| format!("lock: {e}"))
 }
 
-/// True when booted from the live ISO. The archiso initramfs creates
-/// /run/archiso on every live boot; an installed disk never has it, so
-/// this is a leak-proof "am I the live image?" signal.
+/// True when booted from the live ISO. archiso creates /run/archiso on a
+/// live boot; an installed disk never has it.
 fn live_boot(root: &std::path::Path) -> bool {
     root.join("run/archiso").exists()
 }
