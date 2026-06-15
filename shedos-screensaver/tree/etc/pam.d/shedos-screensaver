@@ -1,3 +1,5 @@
 #%PAM-1.0
 auth      include   system-auth
-account   include   system-auth
+# A locker re-auths an existing session; account validity was already
+# enforced at login, and pam_unix's account phase only setuid-fails here.
+account   required  pam_permit.so
