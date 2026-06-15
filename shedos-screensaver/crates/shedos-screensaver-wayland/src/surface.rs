@@ -305,6 +305,9 @@ impl WaylandRenderer {
             ));
         }
         touch_lock_sentinel();
+        // Serial marker for the boot harness: the compositor accepted the
+        // lock and our surfaces are up. Pairs with the "unlocked" line below.
+        eprintln!("shedos-screensaver: locked");
 
         let outputs: Vec<WlOutput> = state.output_state.outputs().collect();
         for o in outputs {
@@ -328,6 +331,7 @@ impl WaylandRenderer {
             .is_some_and(|lb| lb.finished);
         if authenticated {
             clear_lock_sentinel();
+            eprintln!("shedos-screensaver: unlocked");
         }
 
         if let Some(lb) = state.lock_binding.as_mut() {
