@@ -618,6 +618,13 @@ fn run_lock(
         .map_err(|e| format!("lock: {e}"))
 }
 
+/// True when booted from the live ISO. The archiso initramfs creates
+/// /run/archiso on every live boot; an installed disk never has it, so
+/// this is a leak-proof "am I the live image?" signal.
+fn live_boot(root: &std::path::Path) -> bool {
+    root.join("run/archiso").exists()
+}
+
 fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     let username = auth::current_username().map_err(|e| format!("username: {e:#}"))?;
     let theme = Theme::load_or_default();
@@ -643,7 +650,14 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     });
 
     let state_config = build_lock_state_config(cli)?;
-    let fingerprint = build_fingerprint_config(&username);
+    // Live ISO (/run/archiso present): unlock on any key, and skip the
+    // fingerprint thread (no fingers are enrolled on a live boot anyway).
+    let no_auth = live_boot(std::path::Path::new("/"));
+    let fingerprint = if no_auth {
+        None
+    } else {
+        build_fingerprint_config(&username)
+    };
 
     Ok(LockConfig {
         theme,
@@ -653,6 +667,7 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
         state_config,
         username,
         fingerprint,
+        no_auth,
     })
 }
 
@@ -1077,5 +1092,18 @@ mod tests {
         }
         assert!(entered_hold, "rain never reached Holding state");
         assert!(restarted_after_hold, "engine never restarted after hold expired");
+    }
+
+    #[test]
+    fn live_boot_keys_on_run_archiso() {
+        // /run/archiso is the live-ISO marker the lock keys "no password"
+        // on; an installed disk never has it.
+        let base = std::env::temp_dir().join(format!("shedos-livetest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(!super::live_boot(&base), "absent /run/archiso must read as installed");
+        std::fs::create_dir_all(base.join("run/archiso")).unwrap();
+        assert!(super::live_boot(&base), "present /run/archiso must read as live");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

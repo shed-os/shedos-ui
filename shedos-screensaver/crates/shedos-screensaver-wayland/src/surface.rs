@@ -166,6 +166,7 @@ impl WaylandRenderer {
             widget_cache: None,
             theme_dirty: None,
             authenticate: None,
+            no_auth: false,
             username: None,
             prompt_password: String::new(),
             prompt_capslock: false,
@@ -220,6 +221,7 @@ impl WaylandRenderer {
             state_config,
             username,
             fingerprint,
+            no_auth,
         } = lock_config;
         let (fingerprint_rx, fingerprint_ping_source, fingerprint_hint, fingerprint_paused) =
             match fingerprint {
@@ -239,6 +241,7 @@ impl WaylandRenderer {
         state.widget_cache = Some(widget_cache);
         state.theme_dirty = Some(theme_dirty);
         state.authenticate = Some(authenticate);
+        state.no_auth = no_auth;
         state.username = Some(username);
         state.fingerprint_rx = fingerprint_rx;
         state.fingerprint_hint = fingerprint_hint;
@@ -545,6 +548,7 @@ pub(crate) struct AppState {
     widget_cache: Option<WidgetCache>,
     theme_dirty: Option<Arc<AtomicBool>>,
     authenticate: Option<AuthFn>,
+    no_auth: bool,
     username: Option<String>,
     prompt_password: String,
     prompt_capslock: bool,
@@ -1202,6 +1206,15 @@ impl KeyboardHandler for AppState {
         });
         if let Some((from, to)) = transition {
             self.on_phase_change(from, to);
+        }
+
+        // Live ISO: any key unlocks, no password. The transition above
+        // already moved Screensaver/Dpms -> Prompt; here we unlock in the
+        // same frame rather than route the key into the password buffer.
+        if self.no_auth {
+            self.mark_authenticated();
+            self.mark_all_dirty();
+            return;
         }
 
         if self.power_menu.open {

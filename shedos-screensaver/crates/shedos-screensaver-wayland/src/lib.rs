@@ -44,6 +44,10 @@ pub struct LockConfig {
     pub state_config: LockStateConfig,
     pub username: String,
     pub fingerprint: Option<FingerprintConfig>,
+    /// Live ISO: unlock on any keypress without invoking PAM. Set only
+    /// when /run/archiso is present, which is impossible on an installed
+    /// disk, so installed systems always run the full password path.
+    pub no_auth: bool,
 }
 
 pub struct FingerprintConfig {
