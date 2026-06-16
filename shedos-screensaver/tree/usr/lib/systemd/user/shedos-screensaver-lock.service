@@ -2,6 +2,8 @@
 Description=ShedOS lock screen (ext-session-lock-v1 client)
 After=graphical-session.target
 PartOf=graphical-session.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -14,5 +16,3 @@ Restart=on-failure
 # Respawn fast: the session stays input-locked while the client is gone,
 # so a long delay only prolongs the stale frame the compositor shows.
 RestartSec=200ms
-StartLimitBurst=5
-StartLimitIntervalSec=60
