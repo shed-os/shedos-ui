@@ -37,8 +37,13 @@ impl Conversation for FingerprintConv {
     }
     fn error(&mut self, msg: &CStr) {
         let text = msg.to_string_lossy();
-        let lower = text.to_ascii_lowercase();
-        if lower.contains("match") || lower.contains("verify") {
+        // pam_fprintd routes verify-disconnected/verify-unknown-error here
+        // as well as verify-no-match; only the last is a real wrong-finger
+        // touch worth flashing. It hands us its own gettext-localized text
+        // (no result code reaches this PAM callback), so match its exact
+        // no-match msgid. Under a non-English LC_MESSAGES this won't match
+        // and the flash is skipped — driver chatter is suppressed either way.
+        if text == "Failed to match fingerprint" {
             let _ = self.tx.send(Err(()));
             self.ping.ping();
         } else {

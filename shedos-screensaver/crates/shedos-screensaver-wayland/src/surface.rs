@@ -54,6 +54,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use zeroize::{Zeroize, Zeroizing};
 
 const ERROR_HOLD: Duration = Duration::from_secs(2);
 
@@ -168,7 +169,7 @@ impl WaylandRenderer {
             authenticate: None,
             no_auth: false,
             username: None,
-            prompt_password: String::new(),
+            prompt_password: Zeroizing::new(String::new()),
             prompt_capslock: false,
             power_menu: PowerMenuState::default(),
             error: None,
@@ -552,7 +553,10 @@ pub(crate) struct AppState {
     authenticate: Option<AuthFn>,
     no_auth: bool,
     username: Option<String>,
-    prompt_password: String,
+    // Wraps the typed password so its heap buffer is wiped on drop —
+    // mem::take at submit and zeroize() on clear keep plaintext from
+    // lingering in freed memory after the attempt.
+    prompt_password: Zeroizing<String>,
     prompt_capslock: bool,
     power_menu: PowerMenuState,
     error: Option<(Instant, String)>,
@@ -629,7 +633,7 @@ impl AppState {
                 }
             }
             LockPhase::Prompt => {
-                self.prompt_password.clear();
+                self.prompt_password.zeroize();
                 self.fingerprint_status = FingerprintStatus::Idle;
                 if let Some(rx) = self.fingerprint_rx.as_ref() {
                     while rx.try_recv().is_ok() {}
@@ -1265,7 +1269,7 @@ impl KeyboardHandler for AppState {
                 self.mark_all_dirty();
             }
             Keysym::Escape => {
-                self.prompt_password.clear();
+                self.prompt_password.zeroize();
                 self.mark_all_dirty();
             }
             _ => {

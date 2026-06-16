@@ -18,3 +18,4 @@ wayland-protocols.workspace = true
 wayland-protocols-wlr.workspace = true
 fontdue.workspace = true
 image.workspace = true
+zeroize = "1.9"
