@@ -23,9 +23,11 @@
 
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use greetd_ipc::{codec::SyncCodec, AuthMessageType, ErrorType, Request, Response};
+use zeroize::Zeroizing;
 
 /// Worker → UI.
 pub enum AuthEvent {
@@ -55,14 +57,27 @@ impl Drop for Session {
     }
 }
 
+// Bounds a wedged greetd: long enough to clear PAM fail delays,
+// faillock and fprintd hardware waits, short enough that a hung daemon
+// surfaces as an error instead of pinning the auth worker forever.
+const SOCKET_TIMEOUT: Duration = Duration::from_secs(120);
+
 fn connect() -> Result<UnixStream> {
     let path = std::env::var("GREETD_SOCK")
         .context("GREETD_SOCK not set; greeter must be launched by greetd")?;
-    UnixStream::connect(&path).with_context(|| format!("connecting to greetd socket at {path}"))
+    let stream = UnixStream::connect(&path)
+        .with_context(|| format!("connecting to greetd socket at {path}"))?;
+    stream
+        .set_read_timeout(Some(SOCKET_TIMEOUT))
+        .context("set greetd read timeout")?;
+    stream
+        .set_write_timeout(Some(SOCKET_TIMEOUT))
+        .context("set greetd write timeout")?;
+    Ok(stream)
 }
 
 /// Most-recent queued password, if any.
-fn drain_latest(rx: &Receiver<String>) -> Option<String> {
+fn drain_latest(rx: &Receiver<Zeroizing<String>>) -> Option<Zeroizing<String>> {
     let mut latest = None;
     loop {
         match rx.try_recv() {
@@ -79,7 +94,7 @@ fn run_attempt(
     cmd: &[String],
     events: &Sender<AuthEvent>,
     wake: &(impl Fn() + Send),
-    pw_rx: &Receiver<String>,
+    pw_rx: &Receiver<Zeroizing<String>>,
 ) -> Result<bool> {
     let mut session = Session { stream: connect()?, succeeded: false };
     Request::CreateSession { username: username.to_string() }
@@ -114,9 +129,13 @@ fn run_attempt(
                         Some(pw) => pw,
                         None => pw_rx.recv().context("UI hung up")?,
                     };
-                    Request::PostAuthMessageResponse { response: Some(pw) }
+                    // `response` must own a String for the IPC codec; the
+                    // Zeroizing source is wiped when `pw` drops below.
+                    let result = Request::PostAuthMessageResponse { response: Some(pw.to_string()) }
                         .write_to(&mut session.stream)
-                        .context("write PostAuthMessageResponse")?;
+                        .context("write PostAuthMessageResponse");
+                    drop(pw);
+                    result?;
                 }
                 AuthMessageType::Info | AuthMessageType::Error => {
                     log::info!("greetd msg ({:?}): {}", auth_message_type, auth_message);
@@ -161,8 +180,8 @@ pub fn spawn(
     cmd: Vec<String>,
     events: Sender<AuthEvent>,
     wake: impl Fn() + Send + 'static,
-) -> Sender<String> {
-    let (pw_tx, pw_rx) = mpsc::channel::<String>();
+) -> Sender<Zeroizing<String>> {
+    let (pw_tx, pw_rx) = mpsc::channel::<Zeroizing<String>>();
     std::thread::spawn(move || loop {
         match run_attempt(&username, &cmd, &events, &wake, &pw_rx) {
             Ok(true) => {

@@ -51,6 +51,7 @@ use wayland_client::{
 use wayland_protocols::wp::cursor_shape::v1::client::{
     wp_cursor_shape_device_v1::{Shape as CursorShape, WpCursorShapeDeviceV1},
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::greetd;
 use crate::user;
@@ -138,7 +139,7 @@ pub fn run() -> Result<()> {
         size: None,
         outputs: Vec::new(),
         username,
-        password: String::new(),
+        password: Zeroizing::new(String::new()),
         capslock: false,
         power_menu: PowerMenuState::default(),
         error_text: String::new(),
@@ -208,7 +209,9 @@ struct App {
     /// Empty until the first output is announced.
     outputs: Vec<OutputRect>,
     username: Option<String>,
-    password: String,
+    /// Zeroized on drop and on clear so the typed secret doesn't linger
+    /// in freed heap pages.
+    password: Zeroizing<String>,
     capslock: bool,
     power_menu: PowerMenuState,
     /// Error message rendered below the input box during the
@@ -220,7 +223,7 @@ struct App {
     /// Auth conversation worker (greetd.rs). Passwords go down the
     /// sender; events come back via the receiver, drained when the
     /// worker pings the calloop loop.
-    password_tx: Option<std::sync::mpsc::Sender<String>>,
+    password_tx: Option<std::sync::mpsc::Sender<Zeroizing<String>>>,
     auth_events: Option<std::sync::mpsc::Receiver<greetd::AuthEvent>>,
     /// fprintd window open: show the affordance with this hint.
     fingerprint_hint: Option<String>,
@@ -358,13 +361,25 @@ impl App {
 
         let stride = (w * 4) as i32;
         let total = (w as usize) * (h as usize) * 4;
+        // Skip the frame rather than abort the greeter: a transient shm
+        // failure must not strand the user at a dead login screen.
         if total > self.pool.len() {
-            self.pool.resize(total).expect("resize wl_shm pool");
+            if let Err(e) = self.pool.resize(total) {
+                log::warn!("wl_shm pool resize to {total} failed: {e}; skipping frame");
+                return;
+            }
         }
-        let (buffer, canvas) = self
-            .pool
-            .create_buffer(w as i32, h as i32, stride, wl_shm::Format::Argb8888)
-            .expect("create wl_shm buffer");
+        let (buffer, canvas) =
+            match self
+                .pool
+                .create_buffer(w as i32, h as i32, stride, wl_shm::Format::Argb8888)
+            {
+                Ok(bc) => bc,
+                Err(e) => {
+                    log::warn!("wl_shm buffer create failed: {e}; skipping frame");
+                    return;
+                }
+            };
 
         prompt_ui::render(
             canvas,
@@ -532,7 +547,9 @@ impl KeyboardHandler for App {
                 self.power_menu.clamp_selection();
             }
             Keysym::Escape => {
-                self.password.clear();
+                // Wipe, not just truncate: clear() would leave the
+                // secret in the buffer's backing capacity.
+                self.password.zeroize();
             }
             Keysym::BackSpace => {
                 self.password.pop();
