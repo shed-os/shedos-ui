@@ -23,6 +23,7 @@
 
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -184,9 +185,9 @@ pub fn spawn(
     show_username: bool,
     events: Sender<AuthEvent>,
     wake: impl Fn() + Send + 'static,
-) -> Sender<Zeroizing<String>> {
+) -> (Sender<Zeroizing<String>>, JoinHandle<()>) {
     let (pw_tx, pw_rx) = mpsc::channel::<Zeroizing<String>>();
-    std::thread::spawn(move || loop {
+    let handle = std::thread::spawn(move || loop {
         match run_attempt(&username, &cmd, show_username, &events, &wake, &pw_rx) {
             Ok(true) => {
                 let _ = events.send(AuthEvent::SessionStarted);
@@ -195,6 +196,13 @@ pub fn spawn(
             }
             Ok(false) => continue,
             Err(e) => {
+                // The UI dropped its sender — rebind to another user or
+                // shutdown. The session was cancelled on drop; exit so we
+                // don't reconnect and fight the replacement worker over
+                // greetd's single session.
+                if matches!(pw_rx.try_recv(), Err(TryRecvError::Disconnected)) {
+                    return;
+                }
                 log::warn!("auth attempt error: {e:#}");
                 let _ = events.send(AuthEvent::Failed(format!("{e:#}")));
                 wake();
@@ -204,5 +212,5 @@ pub fn spawn(
             }
         }
     });
-    pw_tx
+    (pw_tx, handle)
 }

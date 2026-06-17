@@ -103,7 +103,7 @@ pub fn run() -> Result<()> {
         .or_else(|| user::default_pick(&users))
         .or_else(user::resolve);
     if let Some(name) = username.as_deref() {
-        username_menu.select_by_name(name);
+        username_menu.put_first(name);
     }
 
     // calloop drives the Wayland queue plus two pings: the auth worker
@@ -150,6 +150,7 @@ pub fn run() -> Result<()> {
         error_until: None,
         password_tx: None,
         auth_events: None,
+        auth_handle: None,
         fingerprint_hint: None,
         authenticating: false,
         exit: false,
@@ -176,9 +177,11 @@ pub fn run() -> Result<()> {
         let (ev_tx, ev_rx) = std::sync::mpsc::channel();
         let wake_ping = ping.clone();
         let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
-        app.password_tx = Some(greetd::spawn(username, cmd, app.show_username, ev_tx, move || {
+        let (tx, handle) = greetd::spawn(username, cmd, app.show_username, ev_tx, move || {
             wake_ping.ping();
-        }));
+        });
+        app.password_tx = Some(tx);
+        app.auth_handle = Some(handle);
         app.auth_events = Some(ev_rx);
     }
 
@@ -231,6 +234,9 @@ struct App {
     /// worker pings the calloop loop.
     password_tx: Option<std::sync::mpsc::Sender<Zeroizing<String>>>,
     auth_events: Option<std::sync::mpsc::Receiver<greetd::AuthEvent>>,
+    /// The auth worker thread. Joined on rebind so its greetd session is
+    /// fully cancelled before the replacement worker connects.
+    auth_handle: Option<std::thread::JoinHandle<()>>,
     /// fprintd window open: show the affordance with this hint.
     fingerprint_hint: Option<String>,
     /// A password has been submitted and PAM hasn't answered yet.
@@ -293,13 +299,22 @@ impl App {
         self.authenticating = false;
         self.fingerprint_hint = None;
         self.auth_events = None;
+        // Drop the sender to end the worker's recv, then wait for it to
+        // exit so its greetd session is fully cancelled before the new
+        // worker connects — otherwise the two contend over greetd's
+        // single session and wedge it.
         self.password_tx = None;
+        if let Some(handle) = self.auth_handle.take() {
+            let _ = handle.join();
+        }
         let (ev_tx, ev_rx) = std::sync::mpsc::channel();
         let wake_ping = self.auth_ping.clone();
         let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
-        self.password_tx = Some(greetd::spawn(name, cmd, self.show_username, ev_tx, move || {
+        let (tx, handle) = greetd::spawn(name, cmd, self.show_username, ev_tx, move || {
             wake_ping.ping();
-        }));
+        });
+        self.password_tx = Some(tx);
+        self.auth_handle = Some(handle);
         self.auth_events = Some(ev_rx);
     }
 
