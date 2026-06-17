@@ -17,12 +17,12 @@ const CLOCK_PX: f32 = 120.0;
 const DATE_PX: f32 = 24.0;
 const GREET_PX: f32 = 32.0;
 const BRAND_PX: f32 = 18.0;
-const INPUT_FONT_PX: f32 = 18.0;
+pub(crate) const INPUT_FONT_PX: f32 = 18.0;
 const FP_HINT_PX: f32 = 16.0;
 
-const INPUT_W: u32 = 300;
-const INPUT_H: u32 = 50;
-const INPUT_RADIUS: u32 = 10;
+pub(crate) const INPUT_W: u32 = 300;
+pub(crate) const INPUT_H: u32 = 50;
+pub(crate) const INPUT_RADIUS: u32 = 10;
 const INPUT_BORDER: u32 = 2;
 const INPUT_PAD: i32 = 12;
 
@@ -219,7 +219,7 @@ fn paint_username_menu(
     let (fill_alpha, border_alpha) = if state.open { (0xee, 0xff) } else { (0xb0, 0xcc) };
     draw_rounded_box(
         canvas, canvas_w, canvas_h, fx, fy,
-        username::FIELD_W, username::FIELD_H as u32, username::MENU_RADIUS, 2,
+        username::FIELD_W, username::FIELD_H as u32, username::MENU_RADIUS, INPUT_BORDER,
         base_color, fill_alpha,
         accent_color, border_alpha,
     );
@@ -229,11 +229,20 @@ fn paint_username_menu(
             let (_xmin, ymin, _w, h) = regular.glyph_bbox(ch, username::LABEL_PX);
             let baseline = fy + username::FIELD_H / 2 + ymin + (h as i32) / 2;
             regular.render(
-                label, username::LABEL_PX, fx + 14, baseline,
+                label, username::LABEL_PX, fx + INPUT_PAD, baseline,
                 text_color, 0xff, canvas, canvas_w, canvas_h,
             );
         }
     }
+
+    let chevron = if state.open { '\u{25B4}' } else { '\u{25BE}' };
+    let (cxmin, cymin, cw, ch) = regular.glyph_bbox(chevron, username::LABEL_PX);
+    let chevron_x = fx + username::FIELD_W as i32 - INPUT_PAD - cw as i32 - cxmin;
+    let chevron_baseline = fy + username::FIELD_H / 2 + cymin + (ch as i32) / 2;
+    regular.render(
+        &chevron.to_string(), username::LABEL_PX, chevron_x, chevron_baseline,
+        accent_color, 0xff, canvas, canvas_w, canvas_h,
+    );
 
     if !state.open || state.users.is_empty() {
         return;
@@ -280,7 +289,7 @@ fn paint_username_menu(
             let (_xmin, ymin, _w, h) = face.glyph_bbox(ch, username::LABEL_PX);
             let baseline = row_y + username::ITEM_H / 2 + ymin + (h as i32) / 2;
             face.render(
-                &user.name, username::LABEL_PX, mx + 14, baseline,
+                &user.name, username::LABEL_PX, mx + INPUT_PAD, baseline,
                 label_color, 0xff, canvas, canvas_w, canvas_h,
             );
         }

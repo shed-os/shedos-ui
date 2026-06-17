@@ -4,6 +4,8 @@
 use std::fs;
 
 const PASSWD: &str = "/etc/passwd";
+// ShedOS's own accounts, not human logins.
+const EXCLUDED: &[&str] = &["shedos", "greeter"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
@@ -36,6 +38,7 @@ pub fn enumerate_from(passwd: &str) -> Vec<User> {
             if (1000..65534).contains(&uid)
                 && !shell.ends_with("/false")
                 && !shell.ends_with("/nologin")
+                && !EXCLUDED.contains(&fields[0])
             {
                 Some(User { name: fields[0].to_string(), uid })
             } else {
@@ -96,5 +99,15 @@ erin:x:1000:1000::/home/erin:/bin/bash
     fn enumerate_empty_when_no_regular_user() {
         assert!(enumerate_from("root:x:0:0::/root:/bin/bash\n").is_empty());
         assert!(enumerate_from("").is_empty());
+    }
+
+    #[test]
+    fn enumerate_excludes_shedos_and_greeter() {
+        let passwd = "\
+shedos:x:1000:1000::/home/shedos:/usr/bin/zsh
+greeter:x:1001:1001::/var/lib/greeter:/bin/bash
+theshedman:x:1002:1002::/home/theshedman:/usr/bin/zsh
+";
+        assert_eq!(enumerate_from(passwd), vec![User { name: "theshedman".into(), uid: 1002 }]);
     }
 }

@@ -61,11 +61,11 @@ pub enum UsernameHit {
     Item(usize),
 }
 
-pub const FIELD_W: u32 = 300;
-pub const FIELD_H: i32 = 36;
-pub const ITEM_H: i32 = 36;
-pub const MENU_RADIUS: u32 = 10;
-pub const LABEL_PX: f32 = 18.0;
+pub const FIELD_W: u32 = crate::widgets::INPUT_W;
+pub const FIELD_H: i32 = crate::widgets::INPUT_H as i32;
+pub const ITEM_H: i32 = crate::widgets::INPUT_H as i32;
+pub const MENU_RADIUS: u32 = crate::widgets::INPUT_RADIUS;
+pub const LABEL_PX: f32 = crate::widgets::INPUT_FONT_PX;
 
 /// Field top-left, centered above the password box (drawn at 0.58 of the
 /// rect height).

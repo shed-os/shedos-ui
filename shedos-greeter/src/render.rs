@@ -10,11 +10,16 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use shedos_prompt_ui::{
-    self as prompt_ui,
+    self as prompt_ui, enumerate,
     power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
-    LiveTheme, OutputRect, PromptState, RenderParams, WidgetCache,
+    show_username,
+    username::{self as username_ui},
+    LiveTheme, OutputRect, PromptState, RenderParams, UsernameHit, UsernameMenuState, WidgetCache,
 };
-use smithay_client_toolkit::reexports::calloop::{ping::make_ping, EventLoop};
+use smithay_client_toolkit::reexports::calloop::{
+    ping::{make_ping, Ping},
+    EventLoop,
+};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -91,7 +96,13 @@ pub fn run() -> Result<()> {
     window.commit();
 
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
-    let username = user::resolve();
+    let users = enumerate();
+    let show_username = show_username();
+    let mut username_menu = UsernameMenuState { users: users.clone(), ..Default::default() };
+    let username = user::default_pick(&users).or_else(user::resolve);
+    if let Some(name) = username.as_deref() {
+        username_menu.select_by_name(name);
+    }
 
     // calloop drives the Wayland queue plus two pings: the auth worker
     // fires `ping` after posting a greetd event (PAM progress repaints
@@ -127,6 +138,9 @@ pub fn run() -> Result<()> {
         size: None,
         outputs: Vec::new(),
         username,
+        username_menu,
+        show_username,
+        auth_ping: ping.clone(),
         password: Zeroizing::new(String::new()),
         capslock: false,
         power_menu: PowerMenuState::default(),
@@ -160,7 +174,7 @@ pub fn run() -> Result<()> {
         let (ev_tx, ev_rx) = std::sync::mpsc::channel();
         let wake_ping = ping.clone();
         let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
-        app.password_tx = Some(greetd::spawn(username, cmd, ev_tx, move || {
+        app.password_tx = Some(greetd::spawn(username, cmd, app.show_username, ev_tx, move || {
             wake_ping.ping();
         }));
         app.auth_events = Some(ev_rx);
@@ -194,6 +208,12 @@ struct App {
     /// Empty until the first output is announced.
     outputs: Vec<OutputRect>,
     username: Option<String>,
+    username_menu: UsernameMenuState,
+    show_username: bool,
+    /// Wakes the calloop loop after the auth worker posts an event;
+    /// cloned into each greetd::spawn, kept here so rebind_user can
+    /// hand a fresh worker the same ping.
+    auth_ping: Ping,
     /// Zeroized on drop and on clear so the typed secret doesn't linger
     /// in freed heap pages.
     password: Zeroizing<String>,
@@ -259,6 +279,26 @@ impl App {
         }
         self.authenticating = true;
         self.draw();
+    }
+
+    /// Tear down the current auth worker and spawn a fresh one bound to
+    /// `name`. Dropping the old sender ends the worker's `recv`, so its
+    /// thread exits and the in-flight Session cancels via Drop; the new
+    /// worker re-arms greetd (and the fingerprint reader) for `name`.
+    fn rebind_user(&mut self, name: String) {
+        self.username = Some(name.clone());
+        self.password.zeroize();
+        self.authenticating = false;
+        self.fingerprint_hint = None;
+        self.auth_events = None;
+        self.password_tx = None;
+        let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+        let wake_ping = self.auth_ping.clone();
+        let cmd = vec!["/usr/lib/shedos/start-hyprland-session.sh".to_string()];
+        self.password_tx = Some(greetd::spawn(name, cmd, self.show_username, ev_tx, move || {
+            wake_ping.ping();
+        }));
+        self.auth_events = Some(ev_rx);
     }
 
     /// Drain worker events; called from the calloop ping source.
@@ -332,6 +372,7 @@ impl App {
             success: false,
             capslock: self.capslock,
             power_menu: self.power_menu.clone(),
+            username_menu: self.username_menu.clone(),
         };
 
         let stride = (w * 4) as i32;
@@ -373,6 +414,7 @@ impl App {
                         icon_color_argb: 0xff89b4fa,
                     }
                 }),
+                show_username: self.show_username,
             },
         );
 
@@ -509,6 +551,40 @@ impl KeyboardHandler for App {
                 Keysym::F12 => {
                     self.power_menu.open = false;
                     self.power_menu.kb_active = false;
+                    self.draw();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if self.show_username && self.username_menu.open {
+            match event.keysym {
+                Keysym::Escape => {
+                    self.username_menu.open = false;
+                    self.username_menu.kb_active = false;
+                    self.draw();
+                    return;
+                }
+                Keysym::Up => {
+                    self.username_menu.kb_active = true;
+                    self.username_menu.select_prev();
+                    self.draw();
+                    return;
+                }
+                Keysym::Down => {
+                    self.username_menu.kb_active = true;
+                    self.username_menu.select_next();
+                    self.draw();
+                    return;
+                }
+                Keysym::Return | Keysym::KP_Enter | Keysym::space => {
+                    self.username_menu.open = false;
+                    self.username_menu.kb_active = false;
+                    if let Some(name) = self.username_menu.selected_name().map(str::to_string) {
+                        if self.username.as_deref() != Some(name.as_str()) {
+                            self.rebind_user(name);
+                        }
+                    }
                     self.draw();
                     return;
                 }
@@ -655,9 +731,10 @@ impl PointerHandler for App {
                     if let Some(dev) = self.cursor_device.as_ref() {
                         dev.set_shape(serial, CursorShape::Default);
                     }
-                    self.power_menu.pointer =
-                        Some((e.position.0 as f32, e.position.1 as f32));
-                    if self.power_menu.open {
+                    let pos = Some((e.position.0 as f32, e.position.1 as f32));
+                    self.power_menu.pointer = pos;
+                    self.username_menu.pointer = pos;
+                    if self.power_menu.open || self.username_menu.open {
                         dirty = true;
                     }
                 }
@@ -674,11 +751,23 @@ impl PointerHandler for App {
                             dirty = true;
                         }
                     }
+                    if self.username_menu.open {
+                        let old_hit = self.username_menu.pointer.map(|(ox, oy)| {
+                            username_ui::hit_test(&self.username_menu, &self.outputs, ox, oy)
+                        });
+                        let new_hit =
+                            username_ui::hit_test(&self.username_menu, &self.outputs, new_x, new_y);
+                        if old_hit != Some(new_hit) {
+                            dirty = true;
+                        }
+                    }
                     self.power_menu.pointer = Some((new_x, new_y));
+                    self.username_menu.pointer = Some((new_x, new_y));
                 }
                 PointerEventKind::Leave { .. } => {
-                    let was_open = self.power_menu.open;
+                    let was_open = self.power_menu.open || self.username_menu.open;
                     self.power_menu.pointer = None;
+                    self.username_menu.pointer = None;
                     if was_open {
                         dirty = true;
                     }
@@ -708,6 +797,34 @@ impl PointerHandler for App {
                         self.power_menu.open = false;
                         self.power_menu.kb_active = false;
                         dirty = true;
+                    } else if self.show_username {
+                        match username_ui::hit_test(&self.username_menu, &self.outputs, cx, cy) {
+                            UsernameHit::Field => {
+                                self.username_menu.open = !self.username_menu.open;
+                                self.username_menu.kb_active = false;
+                                self.username_menu.clamp_selection();
+                                dirty = true;
+                            }
+                            UsernameHit::Item(idx) => {
+                                self.username_menu.selected = idx;
+                                self.username_menu.open = false;
+                                self.username_menu.kb_active = false;
+                                if let Some(name) =
+                                    self.username_menu.selected_name().map(str::to_string)
+                                {
+                                    if self.username.as_deref() != Some(name.as_str()) {
+                                        self.rebind_user(name);
+                                    }
+                                }
+                                dirty = true;
+                            }
+                            UsernameHit::None => {
+                                if self.username_menu.open {
+                                    self.username_menu.open = false;
+                                    dirty = true;
+                                }
+                            }
+                        }
                     }
                 }
             }

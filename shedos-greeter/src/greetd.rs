@@ -92,6 +92,7 @@ fn drain_latest(rx: &Receiver<Zeroizing<String>>) -> Option<Zeroizing<String>> {
 fn run_attempt(
     username: &str,
     cmd: &[String],
+    show_username: bool,
     events: &Sender<AuthEvent>,
     wake: &(impl Fn() + Send),
     pw_rx: &Receiver<Zeroizing<String>>,
@@ -108,7 +109,9 @@ fn run_attempt(
             Response::Error { error_type, description } => {
                 log::warn!("greetd auth ended in {:?}: {}", error_type, description);
                 let msg = match error_type {
-                    ErrorType::AuthError => "Incorrect username or password".to_string(),
+                    ErrorType::AuthError => {
+                        shedos_prompt_ui::wrong_credentials_copy(show_username).to_string()
+                    }
                     ErrorType::Error => "Authentication failed. Please try again.".to_string(),
                 };
                 let _ = events.send(AuthEvent::Failed(msg));
@@ -178,12 +181,13 @@ fn run_attempt(
 pub fn spawn(
     username: String,
     cmd: Vec<String>,
+    show_username: bool,
     events: Sender<AuthEvent>,
     wake: impl Fn() + Send + 'static,
 ) -> Sender<Zeroizing<String>> {
     let (pw_tx, pw_rx) = mpsc::channel::<Zeroizing<String>>();
     std::thread::spawn(move || loop {
-        match run_attempt(&username, &cmd, &events, &wake, &pw_rx) {
+        match run_attempt(&username, &cmd, show_username, &events, &wake, &pw_rx) {
             Ok(true) => {
                 let _ = events.send(AuthEvent::SessionStarted);
                 wake();
