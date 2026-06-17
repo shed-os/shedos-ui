@@ -128,6 +128,8 @@ pub struct RenderParams<'a> {
     pub error_message: Option<&'a str>,
     /// Fingerprint icon and hint. None → no fingerprint affordance.
     pub fingerprint: Option<FingerprintRender<'a>>,
+    /// Render the username dropdown. Callers opt in; default false.
+    pub show_username: bool,
 }
 
 /// Per-frame fingerprint affordance state. Caller picks the color
@@ -193,6 +195,7 @@ pub fn render(
             params.error_message,
             params.greeting,
             params.fingerprint.as_ref(),
+            params.show_username,
         );
     }
 }

@@ -50,6 +50,7 @@ pub fn paint_widgets(
     error_message: Option<&str>,
     greeting: Option<&str>,
     fingerprint: Option<&FingerprintRender<'_>>,
+    show_username: bool,
 ) {
     let (px, py, pw, ph) = (output_rect.x, output_rect.y, output_rect.w, output_rect.h);
     let text_color = rgb(theme.text);
@@ -186,10 +187,104 @@ pub fn paint_widgets(
         wordmark_target_w,
     );
 
+    if show_username {
+        paint_username_menu(
+            canvas, canvas_w, canvas_h, output_rect, &state.username_menu,
+            regular, bold, theme,
+        );
+    }
     paint_power_menu(
         canvas, canvas_w, canvas_h, output_rect, &state.power_menu,
         regular, bold, theme,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_username_menu(
+    canvas: &mut [u8],
+    canvas_w: u32,
+    canvas_h: u32,
+    rect: &OutputRect,
+    state: &crate::UsernameMenuState,
+    regular: &FontFace,
+    bold: &FontFace,
+    theme: &Theme,
+) {
+    use crate::username;
+    let text_color = rgb(theme.text);
+    let base_color = rgb(theme.base);
+    let accent_color = rgb(theme.accent);
+
+    let (fx, fy) = username::field_origin(rect);
+    let (fill_alpha, border_alpha) = if state.open { (0xee, 0xff) } else { (0xb0, 0xcc) };
+    draw_rounded_box(
+        canvas, canvas_w, canvas_h, fx, fy,
+        username::FIELD_W, username::FIELD_H as u32, username::MENU_RADIUS, 2,
+        base_color, fill_alpha,
+        accent_color, border_alpha,
+    );
+
+    if let Some(label) = state.selected_name() {
+        if let Some(ch) = label.chars().next() {
+            let (_xmin, ymin, _w, h) = regular.glyph_bbox(ch, username::LABEL_PX);
+            let baseline = fy + username::FIELD_H / 2 + ymin + (h as i32) / 2;
+            regular.render(
+                label, username::LABEL_PX, fx + 14, baseline,
+                text_color, 0xff, canvas, canvas_w, canvas_h,
+            );
+        }
+    }
+
+    if !state.open || state.users.is_empty() {
+        return;
+    }
+
+    let (mx, my) = username::menu_origin(rect);
+    let fw = username::FIELD_W;
+    let menu_h = (username::ITEM_H * state.users.len() as i32) as u32;
+    draw_rounded_box(
+        canvas, canvas_w, canvas_h, mx, my,
+        fw, menu_h, username::MENU_RADIUS, 1,
+        base_color, 0xee,
+        accent_color, 0xcc,
+    );
+
+    let pointer_row = state.pointer.and_then(|(pxx, pyy)| {
+        if pxx < mx as f32 || pxx >= (mx + fw as i32) as f32 {
+            return None;
+        }
+        let local_y = pyy - my as f32;
+        if local_y < 0.0 {
+            return None;
+        }
+        let idx = (local_y / username::ITEM_H as f32) as i32;
+        (idx >= 0 && (idx as usize) < state.users.len()).then_some(idx as usize)
+    });
+
+    for (i, user) in state.users.iter().enumerate() {
+        let row_y = my + (i as i32) * username::ITEM_H;
+        let highlighted = pointer_row == Some(i) || (state.kb_active && state.selected == i);
+        if highlighted {
+            draw_rounded_box(
+                canvas, canvas_w, canvas_h,
+                mx + 4, row_y + 2,
+                fw - 8, (username::ITEM_H - 4) as u32,
+                6, 0,
+                accent_color, 0x33,
+                accent_color, 0x00,
+            );
+        }
+        let face: &FontFace = if highlighted { bold } else { regular };
+        let label_color = if highlighted { accent_color } else { text_color };
+        if let Some(ch) = user.name.chars().next() {
+            let (_xmin, ymin, _w, h) = face.glyph_bbox(ch, username::LABEL_PX);
+            let baseline = row_y + username::ITEM_H / 2 + ymin + (h as i32) / 2;
+            face.render(
+                &user.name, username::LABEL_PX, mx + 14, baseline,
+                label_color, 0xff, canvas, canvas_w, canvas_h,
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
