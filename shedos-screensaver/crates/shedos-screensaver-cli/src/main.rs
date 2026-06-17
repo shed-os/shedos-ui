@@ -20,16 +20,15 @@ use shedos_screensaver_effects::{target, Effect, EffectCtx, Registry as EffectsR
 use shedos_screensaver_i18n::{t, t_str, I18n};
 use shedos_screensaver_logos::{self as logos, LogoVariant};
 use shedos_screensaver_tty::{detect_terminal_size, stdout_is_tty, TerminalGuard, TtyRenderer};
-use shedos_prompt_ui::{watch as theme_watch, Theme, WidgetCache};
 use shedos_screensaver_wayland::calloop_ping;
 use shedos_screensaver_wayland::{
     AuthFn, FingerprintConfig, FrameProducer, LockConfig, LockStateConfig, ProducerFactory,
     WaylandConfig, WaylandRenderer,
 };
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -626,19 +625,6 @@ fn live_boot(root: &std::path::Path) -> bool {
 
 fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     let username = auth::current_username().map_err(|e| format!("username: {e:#}"))?;
-    let theme = Theme::load_or_default();
-    let widget_cache =
-        WidgetCache::new(&theme).map_err(|e| format!("widget cache: {e:#}"))?;
-
-    let theme_dirty = Arc::new(AtomicBool::new(false));
-    let dirty_clone = theme_dirty.clone();
-    if let Err(e) = theme_watch::watch(
-        Path::new("/etc/shedos/themes"),
-        "current",
-        move || dirty_clone.store(true, Ordering::Release),
-    ) {
-        eprintln!("warning: theme watcher disabled: {e:#}");
-    }
 
     let session = auth::PamSession::new("shedos-screensaver", username.clone());
     let authenticate: AuthFn = Box::new(move |password: &str| {
@@ -659,10 +645,7 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     };
 
     Ok(LockConfig {
-        theme,
-        widget_cache,
         authenticate,
-        theme_dirty,
         state_config,
         username,
         fingerprint,

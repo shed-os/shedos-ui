@@ -30,17 +30,12 @@ pub mod calloop_ping {
 
 use shedos_screensaver_core::{Color, Frame};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
-use std::sync::Arc;
 
 pub type AuthFn = Box<dyn Fn(&str) -> Result<(), String>>;
 
 pub struct LockConfig {
-    pub theme: Theme,
-    pub widget_cache: WidgetCache,
     pub authenticate: AuthFn,
-    pub theme_dirty: Arc<AtomicBool>,
     pub state_config: LockStateConfig,
     pub username: String,
     pub fingerprint: Option<FingerprintConfig>,

@@ -21,7 +21,7 @@ use crate::{
 use std::sync::mpsc::Receiver;
 use shedos_prompt_ui::{
     power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
-    OutputRect, PromptState, RenderParams, Theme, WidgetCache,
+    LiveTheme, OutputRect, PromptState, RenderParams, WidgetCache,
 };
 use shedos_screensaver_core::{Color, Frame, LockPhase, LockState};
 use smithay_client_toolkit::{
@@ -163,9 +163,8 @@ impl WaylandRenderer {
             lock_binding: None,
             lock_state: None,
             dpms_manager: None,
-            theme: None,
+            live: None,
             widget_cache: None,
-            theme_dirty: None,
             authenticate: None,
             no_auth: false,
             username: None,
@@ -215,10 +214,7 @@ impl WaylandRenderer {
             Self::bootstrap(config, producer_factory, should_exit)?;
 
         let LockConfig {
-            theme,
-            widget_cache,
             authenticate,
-            theme_dirty,
             state_config,
             username,
             fingerprint,
@@ -238,9 +234,6 @@ impl WaylandRenderer {
         let now = Instant::now();
         state.is_lock_mode = true;
         state.lock_state = Some(LockState::new(state_config, now));
-        state.theme = Some(theme);
-        state.widget_cache = Some(widget_cache);
-        state.theme_dirty = Some(theme_dirty);
         state.authenticate = Some(authenticate);
         state.no_auth = no_auth;
         state.username = Some(username);
@@ -251,6 +244,23 @@ impl WaylandRenderer {
         let mut event_loop: EventLoop<AppState> = EventLoop::try_new()
             .map_err(|e| WaylandError::Connect(format!("calloop event loop: {e}")))?;
         let loop_handle = event_loop.handle();
+
+        // Own the theme through LiveTheme, built here where the calloop
+        // loop exists: its watcher pings theme_ping so a `shedman theme
+        // set` repaints the static Prompt phase instead of waiting for a
+        // keypress, a fingerprint scan, or the idle-hide deadline.
+        let (theme_ping, theme_ping_source) = crate::calloop_ping::make_ping()
+            .map_err(|e| WaylandError::Connect(format!("calloop theme ping: {e}")))?;
+        let live = LiveTheme::new(move || theme_ping.ping());
+        let widget_cache = WidgetCache::new(live.theme())
+            .map_err(|e| WaylandError::Connect(format!("widget cache: {e:#}")))?;
+        state.live = Some(live);
+        state.widget_cache = Some(widget_cache);
+        loop_handle
+            .insert_source(theme_ping_source, |_, _, state: &mut AppState| {
+                state.mark_all_dirty();
+            })
+            .map_err(|e| WaylandError::Connect(format!("calloop theme ping insert: {e:?}")))?;
 
         // Fingerprint-thread ping source: wakes the wayland loop on
         // each scan completion. The callback is a no-op; result
@@ -547,9 +557,8 @@ pub(crate) struct AppState {
     pub(crate) lock_binding: Option<LockBinding>,
     lock_state: Option<LockState>,
     dpms_manager: Option<ZwlrOutputPowerManagerV1>,
-    theme: Option<Theme>,
+    live: Option<LiveTheme>,
     widget_cache: Option<WidgetCache>,
-    theme_dirty: Option<Arc<AtomicBool>>,
     authenticate: Option<AuthFn>,
     no_auth: bool,
     username: Option<String>,
@@ -817,16 +826,14 @@ impl AppState {
             return Ok(());
         }
 
-        // Theme reload + stale-error decay (lock mode only).
+        // Theme reload + stale-error decay (lock mode only). This sits
+        // below the Dpms early-return above on purpose: a theme change
+        // with the monitor off keeps the dirty flag set and reloads on
+        // the next real paint rather than waking a powered-down panel.
         if self.is_lock_mode {
-            if let Some(dirty) = &self.theme_dirty {
-                if dirty.swap(false, Ordering::AcqRel) {
-                    if let Some(theme) = self.theme.as_mut() {
-                        *theme = Theme::load_or_default();
-                        if let Some(cache) = self.widget_cache.as_mut() {
-                            let _ = cache.refresh_wallpaper(theme);
-                        }
-                    }
+            if let (Some(live), Some(cache)) = (self.live.as_mut(), self.widget_cache.as_mut()) {
+                if live.reload_if_dirty() {
+                    let _ = cache.refresh_wallpaper(live.theme());
                 }
             }
             if let Some((t, _)) = self.error.as_ref() {
@@ -850,11 +857,12 @@ impl AppState {
         if s.width == 0 || s.height == 0 {
             return Ok(());
         }
-        let (Some(theme), Some(cache)) =
-            (self.theme.as_ref(), self.widget_cache.as_mut())
+        let (Some(live), Some(cache)) =
+            (self.live.as_ref(), self.widget_cache.as_mut())
         else {
             return Ok(());
         };
+        let theme = live.theme();
 
         let stride = (s.width as i32) * 4;
         let (buffer, canvas) = s
