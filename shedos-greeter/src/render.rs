@@ -6,16 +6,13 @@
 //! one `OutputRect` per `wl_output` and let `prompt_ui::render`
 //! mirror the full UI on each rect.
 
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use shedos_prompt_ui::{
     self as prompt_ui,
     power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
-    watch, OutputRect, PromptState, RenderParams, Theme, WidgetCache,
+    LiveTheme, OutputRect, PromptState, RenderParams, WidgetCache,
 };
 use smithay_client_toolkit::reexports::calloop::{ping::make_ping, EventLoop};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
@@ -60,14 +57,6 @@ const ERROR_HOLD: Duration = Duration::from_secs(2);
 const ERROR_TEXT: &str = "Authentication Failed";
 
 pub fn run() -> Result<()> {
-    let theme = Theme::load_or_default();
-    log::info!(
-        "theme loaded: wallpaper={} blurred={}",
-        theme.wallpaper.display(),
-        theme.wallpaper_blurred.display()
-    );
-    let cache = WidgetCache::new(&theme).context("initialise prompt-ui cache (fonts + wallpaper)")?;
-
     let conn = Connection::connect_to_env()
         .context("connect to Wayland display (is WAYLAND_DISPLAY set?)")?;
     let (globals, event_queue) =
@@ -104,24 +93,23 @@ pub fn run() -> Result<()> {
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
     let username = user::resolve();
 
-    // Inotify watcher flips this when the theme reconciler swaps
-    // `current/` into place. draw() checks it at the top to pick up
-    // the new palette + wallpaper.
-    let theme_dirty = Arc::new(AtomicBool::new(false));
-    let _watcher = {
-        let flag = theme_dirty.clone();
-        match watch::watch(
-            Path::new("/etc/shedos/themes"),
-            "current",
-            move || flag.store(true, Ordering::Release),
-        ) {
-            Ok(h) => Some(h),
-            Err(e) => {
-                log::warn!("theme watcher disabled: {e:#} — live reload unavailable");
-                None
-            }
-        }
-    };
+    // calloop drives the Wayland queue plus two pings: the auth worker
+    // fires `ping` after posting a greetd event (PAM progress repaints
+    // without input), and the theme watcher fires `theme_ping` so a live
+    // `shedman theme set` repaints even an idle login screen.
+    let mut event_loop: EventLoop<App> =
+        EventLoop::try_new().context("create calloop event loop")?;
+    let (ping, ping_source) = make_ping().context("create calloop ping")?;
+    let (theme_ping, theme_ping_source) = make_ping().context("create theme ping")?;
+
+    let live = LiveTheme::new(move || theme_ping.ping());
+    log::info!(
+        "theme loaded: wallpaper={} blurred={}",
+        live.theme().wallpaper.display(),
+        live.theme().wallpaper_blurred.display()
+    );
+    let cache =
+        WidgetCache::new(live.theme()).context("initialise prompt-ui cache (fonts + wallpaper)")?;
 
     let mut app = App {
         registry_state,
@@ -130,7 +118,7 @@ pub fn run() -> Result<()> {
         shm,
         window,
         pool,
-        theme,
+        live,
         cache,
         cursor_device: None,
         cursor_shape,
@@ -144,7 +132,6 @@ pub fn run() -> Result<()> {
         power_menu: PowerMenuState::default(),
         error_text: String::new(),
         error_until: None,
-        theme_dirty,
         password_tx: None,
         auth_events: None,
         fingerprint_hint: None,
@@ -152,18 +139,16 @@ pub fn run() -> Result<()> {
         exit: false,
     };
 
-    // calloop drives the Wayland queue plus a ping the auth worker
-    // fires after posting an event, so PAM progress (fingerprint
-    // window, prompt, result) repaints without waiting for input.
-    let mut event_loop: EventLoop<App> =
-        EventLoop::try_new().context("create calloop event loop")?;
-    let (ping, ping_source) = make_ping().context("create calloop ping")?;
     event_loop
         .handle()
         .insert_source(ping_source, |_, _, app: &mut App| {
             app.drain_auth_events();
         })
         .map_err(|e| anyhow::anyhow!("insert ping source: {e}"))?;
+    event_loop
+        .handle()
+        .insert_source(theme_ping_source, |_, _, app: &mut App| app.draw())
+        .map_err(|e| anyhow::anyhow!("insert theme ping source: {e}"))?;
     WaylandSource::new(conn.clone(), event_queue)
         .insert(event_loop.handle())
         .map_err(|e| anyhow::anyhow!("insert wayland source: {e}"))?;
@@ -196,7 +181,7 @@ struct App {
     shm: Shm,
     window: Window,
     pool: SlotPool,
-    theme: Theme,
+    live: LiveTheme,
     cache: WidgetCache,
     /// Must drop before `pointer`; keep declared first.
     cursor_device: Option<WpCursorShapeDeviceV1>,
@@ -219,7 +204,6 @@ struct App {
     /// error so PAM rejection reasons surface inline.
     error_text: String,
     error_until: Option<Instant>,
-    theme_dirty: Arc<AtomicBool>,
     /// Auth conversation worker (greetd.rs). Passwords go down the
     /// sender; events come back via the receiver, drained when the
     /// worker pings the calloop loop.
@@ -280,14 +264,7 @@ impl App {
     /// Drain worker events; called from the calloop ping source.
     fn drain_auth_events(&mut self) {
         let mut redraw = false;
-        loop {
-            let ev = match &self.auth_events {
-                Some(rx) => match rx.try_recv() {
-                    Ok(ev) => ev,
-                    Err(_) => break,
-                },
-                None => break,
-            };
+        while let Some(Ok(ev)) = self.auth_events.as_ref().map(|rx| rx.try_recv()) {
             redraw = true;
             match ev {
                 greetd::AuthEvent::Fingerprint(hint) => {
@@ -322,10 +299,8 @@ impl App {
         }
 
         // Live theme reload: pick up reconciler swap before composing.
-        if self.theme_dirty.swap(false, Ordering::AcqRel) {
-            log::info!("theme reload signaled; reloading from {}", Theme::CURRENT_DIR);
-            self.theme = Theme::load_or_default();
-            if let Err(e) = self.cache.refresh_wallpaper(&self.theme) {
+        if self.live.reload_if_dirty() {
+            if let Err(e) = self.cache.refresh_wallpaper(self.live.theme()) {
                 log::warn!("wallpaper refresh failed after theme reload: {e:#}");
             }
         }
@@ -387,7 +362,7 @@ impl App {
             h,
             &self.outputs,
             &state,
-            &self.theme,
+            self.live.theme(),
             &mut self.cache,
             &RenderParams {
                 greeting: Some(greeting.as_str()),
