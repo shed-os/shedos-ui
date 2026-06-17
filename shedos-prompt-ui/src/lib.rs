@@ -79,13 +79,15 @@ impl WidgetCache {
         Ok(Self { regular, bold, wallpaper, wordmark })
     }
 
-    /// Re-decode the wallpaper if the theme path changed (e.g. live
-    /// `shedman theme set` while the surface is up). Also re-picks
-    /// the wordmark variant if the wallpaper's luminance class
-    /// flipped (dark ↔ light), so the wordmark stays legible
-    /// against the new background.
+    /// Re-decode the wallpaper if the theme's wallpaper changed (e.g.
+    /// live `shedman theme set wallpaper` while the surface is up). The
+    /// theme path is a stable symlink whose target moves, so staleness
+    /// is judged by the resolved target, not the path string. Also
+    /// re-picks the wordmark variant if the wallpaper's luminance class
+    /// flipped (dark ↔ light), so the wordmark stays legible against
+    /// the new background.
     pub fn refresh_wallpaper(&mut self, theme: &Theme) -> Result<()> {
-        if self.wallpaper.source_path() != theme.wallpaper_blurred {
+        if self.wallpaper.is_stale(&theme.wallpaper_blurred) {
             self.wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
             let wordmark_path = if self.wallpaper.is_average_dark() {
                 &theme.wordmark_on_dark

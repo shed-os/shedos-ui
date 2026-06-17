@@ -18,7 +18,11 @@ use image::imageops::FilterType;
 use crate::OutputRect;
 
 pub struct Wallpaper {
-    source_path: PathBuf,
+    /// Canonicalized target of the (symlinked) source at load time, or
+    /// `None` if it couldn't be resolved. Lets `is_stale` detect a live
+    /// wallpaper swap: the theme's `wallpaper-blurred.png` is a fixed
+    /// symlink name, so only its target moves.
+    resolved: Option<PathBuf>,
     decoded: image::DynamicImage,
     /// Pre-scaled BGRA payloads keyed on (rect_w, rect_h). Each entry
     /// is exactly `w * h * 4` bytes, ready to memcpy row-by-row.
@@ -28,22 +32,42 @@ pub struct Wallpaper {
 impl Wallpaper {
     pub fn load(path: &Path) -> Result<Self> {
         log::info!("loading wallpaper from {}", path.display());
-        let decoded = image::open(path)
-            .with_context(|| format!("opening wallpaper {}", path.display()))?;
+        // Decode by content, not by extension. A theme's
+        // `wallpaper-blurred.png` is a symlink the reconciler points at
+        // the chosen wallpaper's blurred variant, several of which ship
+        // as `.jpg` — so the `.png` name lies. `image::open` trusts the
+        // extension and would feed JPEG bytes to the PNG decoder
+        // ("Invalid PNG signature"), bricking the greeter/lock screen;
+        // sniff the magic bytes so any supported format loads.
+        let decoded = image::ImageReader::open(path)
+            .with_context(|| format!("opening wallpaper {}", path.display()))?
+            .with_guessed_format()
+            .with_context(|| format!("sniffing wallpaper format {}", path.display()))?
+            .decode()
+            .with_context(|| format!("decoding wallpaper {}", path.display()))?;
         log::info!(
             "wallpaper decoded: {}x{}",
             decoded.width(),
             decoded.height()
         );
         Ok(Self {
-            source_path: path.to_path_buf(),
+            resolved: std::fs::canonicalize(path).ok(),
             decoded,
             cache: HashMap::new(),
         })
     }
 
-    pub fn source_path(&self) -> &Path {
-        &self.source_path
+    /// True if `path` now resolves to a different file than the one
+    /// loaded — i.e. the theme's stable `wallpaper-blurred.png` symlink
+    /// was re-pointed by `shedman theme set wallpaper`. Comparing the
+    /// path string is never enough: it is a fixed symlink name.
+    pub fn is_stale(&self, path: &Path) -> bool {
+        match (std::fs::canonicalize(path).ok(), &self.resolved) {
+            (Some(now), Some(loaded)) => &now != loaded,
+            // Either side unresolvable (broken/missing link) — reload
+            // rather than risk keeping a stale image.
+            _ => true,
+        }
     }
 
     /// Return true if the wallpaper's average luminance is below
@@ -138,5 +162,53 @@ impl Wallpaper {
             }
             canvas[dst_off..dst_off + len].copy_from_slice(&bgra[src_off..src_off + len]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, ImageFormat, RgbImage};
+
+    #[test]
+    fn decodes_jpeg_bytes_under_a_png_name() {
+        // A theme's `wallpaper-blurred.png` is a symlink that can point
+        // at JPEG bytes (shipped `-blurred.jpg` variants), so the loader
+        // must decode by content, not by the `.png` extension.
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, image::Rgb([10, 20, 30])));
+        let path = std::env::temp_dir().join("shedos-wallpaper-jpeg-as.png");
+        img.save_with_format(&path, ImageFormat::Jpeg)
+            .expect("write JPEG fixture");
+        let loaded = Wallpaper::load(&path);
+        let _ = std::fs::remove_file(&path);
+        let wp = loaded.expect("JPEG content must decode despite the .png name");
+        assert_eq!((wp.decoded.width(), wp.decoded.height()), (4, 4));
+    }
+
+    #[test]
+    fn is_stale_detects_a_symlink_retarget() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join("shedos-wallpaper-stale-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let a = dir.join("a.png");
+        let b = dir.join("b.png");
+        DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, image::Rgb([1, 2, 3])))
+            .save_with_format(&a, ImageFormat::Png)
+            .expect("write a");
+        DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, image::Rgb([4, 5, 6])))
+            .save_with_format(&b, ImageFormat::Png)
+            .expect("write b");
+        let link = dir.join("current.png");
+        symlink(&a, &link).expect("symlink -> a");
+
+        let wp = Wallpaper::load(&link).expect("load via symlink");
+        assert!(!wp.is_stale(&link), "unchanged target must not be stale");
+
+        std::fs::remove_file(&link).expect("unlink");
+        symlink(&b, &link).expect("symlink -> b");
+        assert!(wp.is_stale(&link), "re-pointed symlink must be stale");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
