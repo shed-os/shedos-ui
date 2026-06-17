@@ -292,6 +292,14 @@ fn paint_username_menu(
                 &user.name, username::LABEL_PX, mx + INPUT_PAD, baseline,
                 label_color, 0xff, canvas, canvas_w, canvas_h,
             );
+            if state.current.as_deref() == Some(user.name.as_str()) {
+                let tag = "(current)";
+                let tag_x = mx + fw as i32 - INPUT_PAD - regular.measure_width(tag, username::LABEL_PX);
+                regular.render(
+                    tag, username::LABEL_PX, tag_x, baseline,
+                    label_color, 0x80, canvas, canvas_w, canvas_h,
+                );
+            }
         }
     }
 }

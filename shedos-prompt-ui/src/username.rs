@@ -9,6 +9,10 @@ pub struct UsernameMenuState {
     pub users: Vec<User>,
     pub selected: usize,
     pub open: bool,
+    /// The account the surface belongs to — floated to the top of the list
+    /// and tagged "(current)". On the greeter it is the default login; on
+    /// the locker it is the user whose session is locked.
+    pub current: Option<String>,
     /// Set once an arrow key is pressed, so the list doesn't pre-highlight
     /// a row after a mouse-open.
     pub kb_active: bool,
@@ -51,6 +55,35 @@ impl UsernameMenuState {
         if let Some(idx) = self.users.iter().position(|u| u.name == name) {
             self.selected = idx;
         }
+    }
+
+    /// Float `name` to the top of the list and select it. No-op if absent.
+    /// The greeter uses this for the default login — first and selected,
+    /// but with no "(current)" claim since no one is logged in yet.
+    pub fn put_first(&mut self, name: &str) {
+        if let Some(idx) = self.users.iter().position(|u| u.name == name) {
+            let user = self.users.remove(idx);
+            self.users.insert(0, user);
+            self.selected = 0;
+        }
+    }
+
+    /// Like [`put_first`](Self::put_first), and additionally tag the row
+    /// "(current)". The locker uses this: the floated user owns the locked
+    /// session, so the tag is true there.
+    pub fn set_current(&mut self, name: &str) {
+        self.put_first(name);
+        if self.users.first().map(|u| u.name.as_str()) == Some(name) {
+            self.current = Some(name.to_string());
+        }
+    }
+
+    /// Snap the selection back to the current account. The locker calls this
+    /// when its menu closes so the field keeps showing the lock owner rather
+    /// than whoever was just picked to switch to.
+    pub fn reset_to_current(&mut self) {
+        self.selected = 0;
+        self.kb_active = false;
     }
 }
 
@@ -190,6 +223,36 @@ mod tests {
         assert_eq!(st.selected_name(), Some("carol"));
         st.select_by_name("missing");
         assert_eq!(st.selected, 2, "unknown name leaves selection unchanged");
+    }
+
+    #[test]
+    fn set_current_floats_to_top_and_tags() {
+        let mut st = UsernameMenuState { users: three_users(), ..Default::default() };
+        st.set_current("carol");
+        assert_eq!(st.users[0].name, "carol", "current floats to the top");
+        assert_eq!(st.users[1].name, "alice", "the rest keep their order");
+        assert_eq!(st.selected, 0);
+        assert_eq!(st.current.as_deref(), Some("carol"));
+        st.select_next();
+        st.reset_to_current();
+        assert_eq!(st.selected, 0, "reset snaps back to the current row");
+    }
+
+    #[test]
+    fn put_first_floats_without_tagging() {
+        let mut st = UsernameMenuState { users: three_users(), ..Default::default() };
+        st.put_first("carol");
+        assert_eq!(st.users[0].name, "carol", "floats to the top");
+        assert_eq!(st.selected, 0);
+        assert_eq!(st.current, None, "no current tag on the greeter");
+    }
+
+    #[test]
+    fn set_current_absent_is_noop() {
+        let mut st = UsernameMenuState { users: three_users(), ..Default::default() };
+        st.set_current("dave");
+        assert_eq!(st.users[0].name, "alice", "unchanged order");
+        assert_eq!(st.current, None);
     }
 
     #[test]
