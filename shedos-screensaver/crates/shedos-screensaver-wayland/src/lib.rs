@@ -44,6 +44,9 @@ pub struct LockConfig {
     /// Live ISO: unlock on any keypress without PAM. Set only when
     /// /run/archiso is present (never on an installed disk).
     pub no_auth: bool,
+    /// Show the username field for fast user switching. The locker only
+    /// raises it when more than one switchable user exists.
+    pub show_username: bool,
 }
 
 pub struct FingerprintConfig {

@@ -63,9 +63,11 @@ pub enum AuthFailure {
 }
 
 impl AuthFailure {
-    pub fn user_message(&self) -> String {
+    pub fn user_message(&self, show_username: bool) -> String {
         match self {
-            Self::WrongPassword => "Wrong password.".into(),
+            Self::WrongPassword => {
+                shedos_prompt_ui::wrong_credentials_copy(show_username).to_string()
+            }
             Self::AccountLocked => {
                 "Account locked. Run `faillock --user $USER --reset` from a tty.".into()
             }
@@ -215,4 +217,17 @@ pub fn current_username() -> Result<String> {
         }
     }
     Err(anyhow!("cannot resolve current uid {} via getpwuid or env", uid))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrong_password_copy_matches_shared_helper() {
+        let with = AuthFailure::WrongPassword.user_message(true);
+        let without = AuthFailure::WrongPassword.user_message(false);
+        assert_eq!(with, shedos_prompt_ui::wrong_credentials_copy(true));
+        assert_eq!(without, shedos_prompt_ui::wrong_credentials_copy(false));
+    }
 }

@@ -21,7 +21,8 @@ use crate::{
 use std::sync::mpsc::Receiver;
 use shedos_prompt_ui::{
     power::{self as power_ui, PowerAction, PowerHit, PowerMenuState},
-    LiveTheme, OutputRect, PromptState, RenderParams, WidgetCache,
+    username::{self as username_ui},
+    LiveTheme, OutputRect, PromptState, RenderParams, UsernameHit, UsernameMenuState, WidgetCache,
 };
 use shedos_screensaver_core::{Color, Frame, LockPhase, LockState};
 use smithay_client_toolkit::{
@@ -171,6 +172,8 @@ impl WaylandRenderer {
             prompt_password: Zeroizing::new(String::new()),
             prompt_capslock: false,
             power_menu: PowerMenuState::default(),
+            username_menu: UsernameMenuState::default(),
+            show_username: false,
             error: None,
             fingerprint_rx: None,
             fingerprint_hint: None,
@@ -219,6 +222,7 @@ impl WaylandRenderer {
             username,
             fingerprint,
             no_auth,
+            show_username,
         } = lock_config;
         let (fingerprint_rx, fingerprint_ping_source, fingerprint_hint, fingerprint_paused) =
             match fingerprint {
@@ -237,6 +241,19 @@ impl WaylandRenderer {
         state.authenticate = Some(authenticate);
         state.no_auth = no_auth;
         state.username = Some(username);
+        // The lock field only earns its place when there is someone to
+        // switch to; on a single-user box it would just list you.
+        if show_username {
+            let users = shedos_prompt_ui::enumerate();
+            if users.len() > 1 {
+                let mut menu = UsernameMenuState { users, ..Default::default() };
+                if let Some(name) = state.username.as_deref() {
+                    menu.select_by_name(name);
+                }
+                state.username_menu = menu;
+                state.show_username = true;
+            }
+        }
         state.fingerprint_rx = fingerprint_rx;
         state.fingerprint_hint = fingerprint_hint;
         state.fingerprint_paused = fingerprint_paused;
@@ -568,6 +585,8 @@ pub(crate) struct AppState {
     prompt_password: Zeroizing<String>,
     prompt_capslock: bool,
     power_menu: PowerMenuState,
+    username_menu: UsernameMenuState,
+    show_username: bool,
     error: Option<(Instant, String)>,
     fingerprint_rx: Option<Receiver<Result<(), ()>>>,
     fingerprint_hint: Option<String>,
@@ -618,6 +637,37 @@ impl AppState {
         match auth(&password) {
             Ok(()) => self.mark_authenticated(),
             Err(msg) => self.error = Some((Instant::now() + ERROR_HOLD, msg)),
+        }
+        self.mark_all_dirty();
+    }
+
+    /// Start a parallel login for `name` on a free VT through the
+    /// polkit-gated helper. Fail closed: any failure surfaces on the
+    /// error line and this session stays locked. The locker proposes the
+    /// VT; the helper re-validates it.
+    fn switch_to_user(&mut self, name: &str) {
+        let Some(vt) = crate::switch::first_free_vt() else {
+            self.error = Some((Instant::now() + ERROR_HOLD, "No free console to switch to".into()));
+            self.mark_all_dirty();
+            return;
+        };
+        let status = std::process::Command::new("pkexec")
+            .arg("/usr/lib/shedos/switch-user")
+            .arg(name)
+            .arg(vt.to_string())
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                self.error = Some((
+                    Instant::now() + ERROR_HOLD,
+                    format!("Could not switch user (exit {})", s.code().unwrap_or(-1)),
+                ));
+            }
+            Err(e) => {
+                self.error =
+                    Some((Instant::now() + ERROR_HOLD, format!("Could not switch user: {e}")));
+            }
         }
         self.mark_all_dirty();
     }
@@ -885,9 +935,7 @@ impl AppState {
             success: false,
             capslock: self.prompt_capslock,
             power_menu: self.power_menu.clone(),
-            // Fast user switching wires this up; the lock prompt shows no
-            // username field until then.
-            username_menu: Default::default(),
+            username_menu: self.username_menu.clone(),
         };
         let greeting = self
             .username
@@ -912,7 +960,7 @@ impl AppState {
             greeting: Some(greeting.as_str()),
             error_message: active_error.map(|(_, m)| m.as_str()),
             fingerprint,
-            show_username: false,
+            show_username: self.show_username,
         };
         let rect = OutputRect {
             x: 0,
@@ -1266,6 +1314,40 @@ impl KeyboardHandler for AppState {
                 _ => {}
             }
         }
+        if self.show_username && self.username_menu.open {
+            match event.keysym {
+                Keysym::Escape => {
+                    self.username_menu.open = false;
+                    self.username_menu.kb_active = false;
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Up => {
+                    self.username_menu.kb_active = true;
+                    self.username_menu.select_prev();
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Down => {
+                    self.username_menu.kb_active = true;
+                    self.username_menu.select_next();
+                    self.mark_all_dirty();
+                    return;
+                }
+                Keysym::Return | Keysym::KP_Enter | Keysym::space => {
+                    self.username_menu.open = false;
+                    self.username_menu.kb_active = false;
+                    if let Some(name) = self.username_menu.selected_name().map(str::to_string) {
+                        if self.username.as_deref() != Some(name.as_str()) {
+                            self.switch_to_user(&name);
+                        }
+                    }
+                    self.mark_all_dirty();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if event.keysym == Keysym::F12 {
             self.power_menu.open = true;
             self.power_menu.kb_active = true;
@@ -1360,9 +1442,10 @@ impl PointerHandler for AppState {
                 .position(|s| s.shell.wl_surface() == &e.surface);
             match e.kind {
                 PointerEventKind::Enter { .. } if surface_idx.is_some() => {
-                    self.power_menu.pointer =
-                        Some((e.position.0 as f32, e.position.1 as f32));
-                    if self.power_menu.open {
+                    let pos = Some((e.position.0 as f32, e.position.1 as f32));
+                    self.power_menu.pointer = pos;
+                    self.username_menu.pointer = pos;
+                    if self.power_menu.open || self.username_menu.open {
                         dirty = true;
                     }
                 }
@@ -1386,12 +1469,24 @@ impl PointerHandler for AppState {
                                 dirty = true;
                             }
                         }
+                        if self.username_menu.open {
+                            let old_hit = self.username_menu.pointer.map(|(ox, oy)| {
+                                username_ui::hit_test(&self.username_menu, &[rect], ox, oy)
+                            });
+                            let new_hit =
+                                username_ui::hit_test(&self.username_menu, &[rect], new_x, new_y);
+                            if old_hit != Some(new_hit) {
+                                dirty = true;
+                            }
+                        }
                         self.power_menu.pointer = Some((new_x, new_y));
+                        self.username_menu.pointer = Some((new_x, new_y));
                     }
                 }
                 PointerEventKind::Leave { .. } => {
-                    let was_open = self.power_menu.open;
+                    let was_open = self.power_menu.open || self.username_menu.open;
                     self.power_menu.pointer = None;
+                    self.username_menu.pointer = None;
                     if was_open {
                         dirty = true;
                     }
@@ -1442,6 +1537,34 @@ impl PointerHandler for AppState {
                         self.power_menu.open = false;
                         self.power_menu.kb_active = false;
                         dirty = true;
+                    } else if self.show_username {
+                        match username_ui::hit_test(&self.username_menu, &[rect], cx, cy) {
+                            UsernameHit::Field => {
+                                self.username_menu.open = !self.username_menu.open;
+                                self.username_menu.kb_active = false;
+                                self.username_menu.clamp_selection();
+                                dirty = true;
+                            }
+                            UsernameHit::Item(idx) => {
+                                self.username_menu.selected = idx;
+                                self.username_menu.open = false;
+                                self.username_menu.kb_active = false;
+                                if let Some(name) =
+                                    self.username_menu.selected_name().map(str::to_string)
+                                {
+                                    if self.username.as_deref() != Some(name.as_str()) {
+                                        self.switch_to_user(&name);
+                                    }
+                                }
+                                dirty = true;
+                            }
+                            UsernameHit::None => {
+                                if self.username_menu.open {
+                                    self.username_menu.open = false;
+                                    dirty = true;
+                                }
+                            }
+                        }
                     }
                 }
             }

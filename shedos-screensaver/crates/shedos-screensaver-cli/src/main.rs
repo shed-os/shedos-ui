@@ -626,11 +626,12 @@ fn live_boot(root: &std::path::Path) -> bool {
 fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
     let username = auth::current_username().map_err(|e| format!("username: {e:#}"))?;
 
+    let show_username = shedos_prompt_ui::show_username();
     let session = auth::PamSession::new("shedos-screensaver", username.clone());
     let authenticate: AuthFn = Box::new(move |password: &str| {
         session.authenticate(password).map_err(|e| {
             eprintln!("shedos-screensaver: pam: {e:?}");
-            e.user_message()
+            e.user_message(show_username)
         })
     });
 
@@ -650,6 +651,7 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
         username,
         fingerprint,
         no_auth,
+        show_username,
     })
 }
 
