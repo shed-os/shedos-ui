@@ -6,7 +6,7 @@
 
 pkgname=shedos-switcher
 pkgver=2026.06.16
-pkgrel=1
+pkgrel=2
 pkgdesc='ShedOS Alt-Tab window switcher overlay'
 arch=('x86_64')
 url='https://github.com/Theshedman/shedos'
