@@ -18,10 +18,8 @@ fn rgb(v: u32) -> (u8, u8, u8) {
     (((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8)
 }
 
-pub fn palette() -> &'static Palette {
-    static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    PALETTE.get_or_init(|| {
-        let t = shedos_prompt_ui::Theme::load_or_default();
+impl Palette {
+    pub fn from_theme(t: &shedos_prompt_ui::Theme) -> Self {
         Palette {
             text: rgb(t.text),
             muted: rgb(t.overlay1),
@@ -31,7 +29,7 @@ pub fn palette() -> &'static Palette {
             backdrop_rgb: rgb(t.base),
             accent: rgb(t.accent),
         }
-    })
+    }
 }
 
 const BACKDROP_ALPHA: u8 = 0xb3; // 0.7
@@ -181,8 +179,7 @@ impl TourState {
     }
 }
 
-fn fill_backdrop(canvas: &mut [u8], w: u32, h: u32, alpha: u8) {
-    let p = palette();
+fn fill_backdrop(canvas: &mut [u8], w: u32, h: u32, alpha: u8, p: &Palette) {
     let (r, g, b) = p.backdrop_rgb;
     let a = alpha as u32;
     let pre = |c: u8| ((c as u32 * a) / 255) as u8;
@@ -217,8 +214,8 @@ fn draw_art(
     cx: i32,
     top: i32,
     a8: u8,
+    p: &Palette,
 ) {
-    let p = palette();
     match art {
         Art::Wordmark => {
             if let Some(wm) = wm {
@@ -289,9 +286,9 @@ pub fn paint(
     regular: &FontFace,
     bold: &FontFace,
     wordmark: Option<&mut Wordmark>,
+    p: &Palette,
 ) {
-    let p = palette();
-    fill_backdrop(canvas, w, h, BACKDROP_ALPHA);
+    fill_backdrop(canvas, w, h, BACKDROP_ALPHA, p);
     let a8: u8 = 0xff;
 
     let card_x = (w as i32 - CARD_W as i32) / 2;
@@ -306,7 +303,7 @@ pub fn paint(
     let mut y = card_y + 36;
 
     if slide.art != Art::None {
-        draw_art(canvas, w, h, slide.art, wordmark, cx, y, a8);
+        draw_art(canvas, w, h, slide.art, wordmark, cx, y, a8, p);
         y += 92;
     } else {
         y += 24;

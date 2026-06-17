@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use shedos_prompt_ui::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
+use shedos_prompt_ui::LiveTheme;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
@@ -21,6 +22,10 @@ use smithay_client_toolkit::{
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
+use smithay_client_toolkit::reexports::{
+    calloop::{ping::make_ping, EventLoop},
+    calloop_wayland_source::WaylandSource,
+};
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{
@@ -37,7 +42,7 @@ use crate::slides::{self, TourState};
 
 pub fn run() -> Result<()> {
     let conn = Connection::connect_to_env().context("connect to Wayland (WAYLAND_DISPLAY)")?;
-    let (globals, mut event_queue) =
+    let (globals, event_queue) =
         registry_queue_init::<App>(&conn).context("init Wayland registry")?;
     let qh = event_queue.handle();
 
@@ -59,14 +64,6 @@ pub fn run() -> Result<()> {
 
     let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
     let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
-    let theme = shedos_prompt_ui::Theme::load_or_default();
-    let wordmark = match shedos_prompt_ui::wordmark::Wordmark::load(&theme.wordmark_on_dark) {
-        Ok(wm) => Some(wm),
-        Err(e) => {
-            log::warn!("wordmark unavailable: {e:#}; slide 1 renders without it");
-            None
-        }
-    };
 
     let surface = compositor.create_surface(&qh);
     let layer = layer_shell.create_layer_surface(
@@ -82,6 +79,27 @@ pub fn run() -> Result<()> {
     layer.commit();
 
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
+
+    let mut event_loop: EventLoop<App> =
+        EventLoop::try_new().context("calloop event loop")?;
+    let loop_handle = event_loop.handle();
+
+    // The theme watcher pings this so an idle tour repaints on a live
+    // `shedman theme set`; the handler redraws, which reloads the theme.
+    let (theme_ping, theme_ping_source) = make_ping().context("theme calloop ping")?;
+    loop_handle
+        .insert_source(theme_ping_source, |_, _, app: &mut App| app.draw())
+        .map_err(|e| anyhow::anyhow!("insert theme ping source: {e}"))?;
+
+    let live = LiveTheme::new(move || theme_ping.ping());
+    let wordmark = match shedos_prompt_ui::wordmark::Wordmark::load(&live.theme().wordmark_on_dark)
+    {
+        Ok(wm) => Some(wm),
+        Err(e) => {
+            log::warn!("wordmark unavailable: {e:#}; slide 1 renders without it");
+            None
+        }
+    };
 
     let mut app = App {
         registry_state,
@@ -99,13 +117,18 @@ pub fn run() -> Result<()> {
         regular,
         bold,
         wordmark,
+        live,
         exit: false,
     };
 
+    WaylandSource::new(conn.clone(), event_queue)
+        .insert(loop_handle)
+        .map_err(|e| anyhow::anyhow!("calloop wayland insert: {e}"))?;
+
     while !app.exit {
-        event_queue
-            .blocking_dispatch(&mut app)
-            .context("Wayland event dispatch")?;
+        event_loop
+            .dispatch(None, &mut app)
+            .context("event loop dispatch")?;
     }
 
     if app.state.open_keybindings {
@@ -134,6 +157,7 @@ struct App {
     regular: FontFace,
     bold: FontFace,
     wordmark: Option<shedos_prompt_ui::wordmark::Wordmark>,
+    live: LiveTheme,
     exit: bool,
 }
 
@@ -144,6 +168,17 @@ impl App {
         };
         if w == 0 || h == 0 {
             return;
+        }
+        if self.live.reload_if_dirty() {
+            self.wordmark = match shedos_prompt_ui::wordmark::Wordmark::load(
+                &self.live.theme().wordmark_on_dark,
+            ) {
+                Ok(wm) => Some(wm),
+                Err(e) => {
+                    log::warn!("wordmark reload failed after theme change: {e:#}");
+                    None
+                }
+            };
         }
         let stride = (w * 4) as i32;
         let need = (w as usize) * (h as usize) * 4;
@@ -164,9 +199,10 @@ impl App {
             }
         };
 
+        let palette = slides::Palette::from_theme(self.live.theme());
         slides::paint(
             canvas, w, h, &self.state, &self.regular, &self.bold,
-            self.wordmark.as_mut(),
+            self.wordmark.as_mut(), &palette,
         );
 
         let surface = self.layer.wl_surface().clone();
