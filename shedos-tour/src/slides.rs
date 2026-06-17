@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use shedos_prompt_ui::primitives::{blend_pixel, draw_rounded_box};
 use shedos_prompt_ui::text::FontFace;
 use shedos_prompt_ui::wordmark::Wordmark;
@@ -50,10 +48,6 @@ const HINT_PX: f32 = 11.5;
 const LINE_GAP: i32 = 26;
 const DOT_R: i32 = 4;
 const DOT_GAP: i32 = 18;
-
-const OPEN_MS: u32 = 150;
-const SWAP_MS: u32 = 130;
-const DISMISS_MS: u32 = 120;
 
 /// One body row: optional key caps, description text.
 pub struct Row {
@@ -157,18 +151,9 @@ pub const SLIDES: &[Slide] = &[
     },
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Phase {
-    Open,
-    Swap,
-    Dismiss,
-}
-
 pub struct TourState {
     pub slide: usize,
     pub open_keybindings: bool,
-    phase: Phase,
-    phase_at: Instant,
 }
 
 impl TourState {
@@ -176,8 +161,6 @@ impl TourState {
         Self {
             slide: 0,
             open_keybindings: false,
-            phase: Phase::Open,
-            phase_at: Instant::now(),
         }
     }
 
@@ -188,49 +171,12 @@ impl TourState {
     pub fn next(&mut self) {
         if self.slide + 1 < SLIDES.len() {
             self.slide += 1;
-            self.phase = Phase::Swap;
-            self.phase_at = Instant::now();
         }
     }
 
     pub fn prev(&mut self) {
         if self.slide > 0 {
             self.slide -= 1;
-            self.phase = Phase::Swap;
-            self.phase_at = Instant::now();
-        }
-    }
-
-    pub fn enter_dismiss(&mut self) {
-        self.phase = Phase::Dismiss;
-        self.phase_at = Instant::now();
-    }
-
-    pub fn is_dismissing(&self) -> bool {
-        self.phase == Phase::Dismiss
-    }
-
-    pub fn dismiss_done(&self, now: Instant) -> bool {
-        self.phase == Phase::Dismiss
-            && now.duration_since(self.phase_at).as_millis() as u32 >= DISMISS_MS
-    }
-
-    pub fn is_settled(&self, now: Instant) -> bool {
-        let elapsed = now.duration_since(self.phase_at).as_millis() as u32;
-        match self.phase {
-            Phase::Open => elapsed >= OPEN_MS,
-            Phase::Swap => elapsed >= SWAP_MS,
-            Phase::Dismiss => false,
-        }
-    }
-
-    /// 0.0–1.0 content opacity for the current phase.
-    fn content_alpha(&self, now: Instant) -> f32 {
-        let elapsed = now.duration_since(self.phase_at).as_millis() as f32;
-        match self.phase {
-            Phase::Open => (elapsed / OPEN_MS as f32).min(1.0),
-            Phase::Swap => (elapsed / SWAP_MS as f32).min(1.0),
-            Phase::Dismiss => 1.0 - (elapsed / DISMISS_MS as f32).min(1.0),
         }
     }
 }
@@ -343,17 +289,10 @@ pub fn paint(
     regular: &FontFace,
     bold: &FontFace,
     wordmark: Option<&mut Wordmark>,
-    now: Instant,
 ) {
     let p = palette();
-    let alpha = state.content_alpha(now);
-    let backdrop = (BACKDROP_ALPHA as f32 * alpha) as u8;
-    fill_backdrop(canvas, w, h, backdrop);
-
-    let a8 = (255.0 * alpha) as u8;
-    if a8 == 0 {
-        return;
-    }
+    fill_backdrop(canvas, w, h, BACKDROP_ALPHA);
+    let a8: u8 = 0xff;
 
     let card_x = (w as i32 - CARD_W as i32) / 2;
     let card_y = (h as i32 - CARD_H as i32) / 2;

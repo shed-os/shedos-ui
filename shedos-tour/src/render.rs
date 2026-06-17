@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use anyhow::{Context, Result};
 use shedos_prompt_ui::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
 use smithay_client_toolkit::{
@@ -96,7 +94,6 @@ pub fn run() -> Result<()> {
         cursor_shape,
         pointer: None,
         keyboard: None,
-        qh: qh.clone(),
         size: None,
         state: TourState::new(),
         regular,
@@ -109,10 +106,6 @@ pub fn run() -> Result<()> {
         event_queue
             .blocking_dispatch(&mut app)
             .context("Wayland event dispatch")?;
-        let now = Instant::now();
-        if app.state.dismiss_done(now) {
-            app.exit = true;
-        }
     }
 
     if app.state.open_keybindings {
@@ -136,7 +129,6 @@ struct App {
     cursor_shape: Option<CursorShapeManager>,
     pointer: Option<WlPointer>,
     keyboard: Option<WlKeyboard>,
-    qh: QueueHandle<Self>,
     size: Option<(u32, u32)>,
     state: TourState,
     regular: FontFace,
@@ -172,16 +164,14 @@ impl App {
             }
         };
 
-        let now = Instant::now();
         slides::paint(
             canvas, w, h, &self.state, &self.regular, &self.bold,
-            self.wordmark.as_mut(), now,
+            self.wordmark.as_mut(),
         );
 
         let surface = self.layer.wl_surface().clone();
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
         surface.damage_buffer(0, 0, w as i32, h as i32);
-        surface.frame(&self.qh, surface.clone());
         surface.commit();
     }
 
@@ -232,13 +222,7 @@ impl CompositorHandler for App {
         _: wl_output::Transform,
     ) {
     }
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlSurface, _: u32) {
-        // Animations (open fade, slide swap, dismiss) drive frames;
-        // once settled we stop scheduling new callbacks.
-        if !self.state.is_settled(Instant::now()) {
-            self.draw();
-        }
-    }
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlSurface, _: u32) {}
     fn surface_enter(
         &mut self,
         _: &Connection,
@@ -331,19 +315,14 @@ impl KeyboardHandler for App {
         _: u32,
         event: KeyEvent,
     ) {
-        if self.state.is_dismissing() {
-            return;
-        }
         match event.keysym {
             Keysym::Escape | Keysym::q => {
-                self.state.enter_dismiss();
-                self.draw();
+                self.exit = true;
             }
             Keysym::Return | Keysym::KP_Enter => {
                 if self.state.on_last_slide() {
                     self.state.open_keybindings = true;
-                    self.state.enter_dismiss();
-                    self.draw();
+                    self.exit = true;
                 } else {
                     self.advance();
                 }
@@ -399,9 +378,7 @@ impl PointerHandler for App {
                         dev.set_shape(serial, CursorShape::Default);
                     }
                 }
-                PointerEventKind::Press { button: 0x110, .. }
-                    if !self.state.is_dismissing() =>
-                {
+                PointerEventKind::Press { button: 0x110, .. } => {
                     self.advance();
                 }
                 _ => {}
