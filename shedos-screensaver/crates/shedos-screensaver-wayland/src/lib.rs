@@ -13,12 +13,14 @@ mod dpms;
 mod font;
 mod lock;
 mod surface;
+mod switch;
 mod wallpaper;
 
 pub use font::FontAtlas;
 pub use shedos_prompt_ui::{Theme, WidgetCache};
 pub use shedos_screensaver_core::LockStateConfig;
 pub use surface::{ProducerFactory, WaylandRenderer};
+pub use switch::first_free_vt;
 pub use wallpaper::Wallpaper;
 
 /// Re-exports of calloop's ping primitives so the cli crate can build

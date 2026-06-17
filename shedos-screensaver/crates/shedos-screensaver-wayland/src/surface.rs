@@ -885,6 +885,9 @@ impl AppState {
             success: false,
             capslock: self.prompt_capslock,
             power_menu: self.power_menu.clone(),
+            // Fast user switching wires this up; the lock prompt shows no
+            // username field until then.
+            username_menu: Default::default(),
         };
         let greeting = self
             .username
@@ -909,6 +912,7 @@ impl AppState {
             greeting: Some(greeting.as_str()),
             error_message: active_error.map(|(_, m)| m.as_str()),
             fingerprint,
+            show_username: false,
         };
         let rect = OutputRect {
             x: 0,
