@@ -248,7 +248,7 @@ impl WaylandRenderer {
             if users.len() > 1 {
                 let mut menu = UsernameMenuState { users, ..Default::default() };
                 if let Some(name) = state.username.as_deref() {
-                    menu.select_by_name(name);
+                    menu.set_current(name);
                 }
                 state.username_menu = menu;
                 state.show_username = true;
@@ -1318,7 +1318,7 @@ impl KeyboardHandler for AppState {
             match event.keysym {
                 Keysym::Escape => {
                     self.username_menu.open = false;
-                    self.username_menu.kb_active = false;
+                    self.username_menu.reset_to_current();
                     self.mark_all_dirty();
                     return;
                 }
@@ -1336,12 +1336,14 @@ impl KeyboardHandler for AppState {
                 }
                 Keysym::Return | Keysym::KP_Enter | Keysym::space => {
                     self.username_menu.open = false;
-                    self.username_menu.kb_active = false;
                     if let Some(name) = self.username_menu.selected_name().map(str::to_string) {
                         if self.username.as_deref() != Some(name.as_str()) {
                             self.switch_to_user(&name);
                         }
                     }
+                    // The locker field always shows the lock owner; drop the
+                    // navigated selection so it does not stick.
+                    self.username_menu.reset_to_current();
                     self.mark_all_dirty();
                     return;
                 }
@@ -1542,25 +1544,32 @@ impl PointerHandler for AppState {
                             UsernameHit::Field => {
                                 self.username_menu.open = !self.username_menu.open;
                                 self.username_menu.kb_active = false;
-                                self.username_menu.clamp_selection();
+                                if self.username_menu.open {
+                                    self.username_menu.clamp_selection();
+                                } else {
+                                    self.username_menu.reset_to_current();
+                                }
                                 dirty = true;
                             }
                             UsernameHit::Item(idx) => {
-                                self.username_menu.selected = idx;
                                 self.username_menu.open = false;
-                                self.username_menu.kb_active = false;
+                                // Read the target straight from the row — never
+                                // write it into the selection, so the field keeps
+                                // showing the lock owner, not who we switch to.
                                 if let Some(name) =
-                                    self.username_menu.selected_name().map(str::to_string)
+                                    self.username_menu.users.get(idx).map(|u| u.name.clone())
                                 {
                                     if self.username.as_deref() != Some(name.as_str()) {
                                         self.switch_to_user(&name);
                                     }
                                 }
+                                self.username_menu.reset_to_current();
                                 dirty = true;
                             }
                             UsernameHit::None => {
                                 if self.username_menu.open {
                                     self.username_menu.open = false;
+                                    self.username_menu.reset_to_current();
                                     dirty = true;
                                 }
                             }
