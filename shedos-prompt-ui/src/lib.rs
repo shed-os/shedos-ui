@@ -17,6 +17,7 @@ pub mod text;
 pub mod theme;
 pub mod theme_live;
 pub mod wallpaper;
+pub mod username;
 pub mod users;
 pub mod watch;
 pub mod widgets;
@@ -24,6 +25,7 @@ pub mod wordmark;
 
 pub use login::{show_username, wrong_credentials_copy};
 pub use power::{PowerAction, PowerHit, PowerMenuState};
+pub use username::{UsernameHit, UsernameMenuState};
 pub use users::{enumerate, User};
 pub use theme::Theme;
 pub use theme_live::LiveTheme;
@@ -41,6 +43,7 @@ pub struct PromptState {
     pub success: bool,
     pub capslock: bool,
     pub power_menu: PowerMenuState,
+    pub username_menu: UsernameMenuState,
 }
 
 /// Logical rect (in canvas-local pixels) where one output sits. Used
