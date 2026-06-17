@@ -16,10 +16,8 @@ fn rgb(v: u32) -> (u8, u8, u8) {
     (((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8)
 }
 
-pub fn palette() -> &'static Palette {
-    static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    PALETTE.get_or_init(|| {
-        let t = shedos_prompt_ui::Theme::load_or_default();
+impl Palette {
+    pub fn from_theme(t: &shedos_prompt_ui::Theme) -> Self {
         Palette {
             text: rgb(t.text),
             muted: rgb(t.overlay1),
@@ -28,7 +26,7 @@ pub fn palette() -> &'static Palette {
             tile_bg: rgb(t.surface0),
             accent: rgb(t.accent),
         }
-    })
+    }
 }
 
 // Card geometry. The strip is one centered row; the surface is sized
@@ -84,6 +82,7 @@ fn ellipsize(face: &FontFace, text: &str, px: f32, max_w: i32) -> String {
     "…".into()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn paint(
     canvas: &mut [u8],
     w: u32,
@@ -92,9 +91,8 @@ pub fn paint(
     selected: usize,
     regular: &FontFace,
     bold: &FontFace,
+    p: &Palette,
 ) {
-    let p = palette();
-
     // Panel backdrop (the whole surface IS the panel).
     draw_rounded_box(
         canvas, w, h, 0, 0, w, h, 16, 1, p.card_bg, 0xf2, p.card_border, 0xff,

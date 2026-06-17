@@ -2,8 +2,9 @@ use std::os::unix::net::UnixListener;
 
 use anyhow::{Context, Result};
 use shedos_prompt_ui::text::{FontFace, JBM_BOLD_CANDIDATES, JBM_REGULAR_CANDIDATES};
+use shedos_prompt_ui::LiveTheme;
 use smithay_client_toolkit::reexports::{
-    calloop::{channel, EventLoop},
+    calloop::{channel, ping::make_ping, EventLoop},
     calloop_wayland_source::WaylandSource,
 };
 use smithay_client_toolkit::{
@@ -82,6 +83,15 @@ pub fn run(windows: Vec<Window>, listener: UnixListener) -> Result<()> {
 
     let pool = SlotPool::new(4, &shm).context("create wl_shm slot pool")?;
 
+    let mut event_loop: EventLoop<App> =
+        EventLoop::try_new().context("calloop event loop")?;
+    let loop_handle = event_loop.handle();
+
+    // The theme watcher pings this so the strip re-themes live if a
+    // `shedman theme set` lands while it's open; the handler redraws.
+    let (theme_ping, theme_ping_source) = make_ping().context("theme calloop ping")?;
+    let live = LiveTheme::new(move || theme_ping.ping());
+
     let mut app = App {
         registry_state,
         output_state,
@@ -99,12 +109,13 @@ pub fn run(windows: Vec<Window>, listener: UnixListener) -> Result<()> {
         alt_seen_held: false,
         regular,
         bold,
+        live,
         outcome: Outcome::Pending,
     };
 
-    let mut event_loop: EventLoop<App> =
-        EventLoop::try_new().context("calloop event loop")?;
-    let loop_handle = event_loop.handle();
+    loop_handle
+        .insert_source(theme_ping_source, |_, _, app: &mut App| app.draw())
+        .map_err(|e| anyhow::anyhow!("calloop theme ping insert: {e}"))?;
 
     let (tx, rx) = channel::channel::<Cmd>();
     std::thread::spawn(move || crate::listen(listener, tx));
@@ -173,6 +184,7 @@ struct App {
     alt_seen_held: bool,
     regular: FontFace,
     bold: FontFace,
+    live: LiveTheme,
     outcome: Outcome,
 }
 
@@ -204,7 +216,11 @@ impl App {
         // they're transparent rather than stale.
         canvas.fill(0);
 
-        ui::paint(canvas, w, h, &self.windows, self.selected, &self.regular, &self.bold);
+        self.live.reload_if_dirty(); // no derived caches to refresh
+        let palette = ui::Palette::from_theme(self.live.theme());
+        ui::paint(
+            canvas, w, h, &self.windows, self.selected, &self.regular, &self.bold, &palette,
+        );
 
         let surface = self.layer.wl_surface().clone();
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
