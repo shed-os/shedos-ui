@@ -70,6 +70,26 @@ impl Wallpaper {
         }
     }
 
+    /// A solid-color fallback for when the themed wallpaper can't be
+    /// decoded, so the greeter and lock screen still come up on a plain
+    /// background instead of failing to build their cache. The 64x64
+    /// fill scales to any output through the same blit path. `resolved`
+    /// is None so the next theme change retries the real wallpaper.
+    pub fn solid(color: u32) -> Self {
+        let r = ((color >> 16) & 0xff) as u8;
+        let g = ((color >> 8) & 0xff) as u8;
+        let b = (color & 0xff) as u8;
+        Self {
+            resolved: None,
+            decoded: image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                64,
+                64,
+                image::Rgb([r, g, b]),
+            )),
+            cache: HashMap::new(),
+        }
+    }
+
     /// Return true if the wallpaper's average luminance is below
     /// 128. Samples a 10x10 grid (100 pixels) using Rec. 601 luma:
     /// `Y = 0.299 R + 0.587 G + 0.114 B`. Used by the prompt-ui
@@ -210,5 +230,16 @@ mod tests {
         assert!(wp.is_stale(&link), "re-pointed symlink must be stale");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn solid_is_a_uniform_fallback() {
+        let dark = Wallpaper::solid(0x1e1e2e);
+        assert_eq!((dark.decoded.width(), dark.decoded.height()), (64, 64));
+        assert!(dark.is_average_dark(), "a dark base reads as dark");
+        assert!(
+            !Wallpaper::solid(0xffffff).is_average_dark(),
+            "white reads as light"
+        );
     }
 }

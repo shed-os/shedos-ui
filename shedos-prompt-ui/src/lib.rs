@@ -69,7 +69,16 @@ impl WidgetCache {
     pub fn new(theme: &Theme) -> Result<Self> {
         let regular = FontFace::load(JBM_REGULAR_CANDIDATES)?;
         let bold = FontFace::load(JBM_BOLD_CANDIDATES)?;
-        let wallpaper = Wallpaper::load(&theme.wallpaper_blurred)?;
+        // A cosmetic asset must never brick the greeter/lock screen:
+        // if the wallpaper can't be decoded, fall back to a solid
+        // background and still build the cache.
+        let wallpaper = Wallpaper::load(&theme.wallpaper_blurred).unwrap_or_else(|e| {
+            log::warn!(
+                "wallpaper {} unreadable ({e:#}); using a solid background",
+                theme.wallpaper_blurred.display()
+            );
+            Wallpaper::solid(theme.base)
+        });
         let wordmark_path = if wallpaper.is_average_dark() {
             &theme.wordmark_on_dark
         } else {
