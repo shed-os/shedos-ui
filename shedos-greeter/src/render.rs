@@ -99,7 +99,9 @@ pub fn run() -> Result<()> {
     let users = enumerate();
     let show_username = show_username();
     let mut username_menu = UsernameMenuState { users: users.clone(), ..Default::default() };
-    let username = user::default_pick(&users).or_else(user::resolve);
+    let username = user::preselect(&users)
+        .or_else(|| user::default_pick(&users))
+        .or_else(user::resolve);
     if let Some(name) = username.as_deref() {
         username_menu.select_by_name(name);
     }

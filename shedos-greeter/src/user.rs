@@ -24,6 +24,28 @@ pub fn resolve() -> Option<String> {
     autodetect()
 }
 
+const PRESELECT_FILE: &str = "/run/shedos/switch-preselect";
+
+/// Username handed in by the fast-user-switching helper for this login.
+/// Taken from the `SHEDOS_PRESELECT_USER` override or the run-file the
+/// helper wrote, then the run-file is cleared so a later main-screen
+/// greeter can't inherit a stale name. Honored only when it names one of
+/// the enumerated users.
+pub fn preselect(users: &[shedos_prompt_ui::User]) -> Option<String> {
+    let name = std::env::var("SHEDOS_PRESELECT_USER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_preselect_file);
+    name.filter(|n| users.iter().any(|u| &u.name == n))
+}
+
+fn read_preselect_file() -> Option<String> {
+    let text = fs::read_to_string(PRESELECT_FILE).ok()?;
+    let _ = fs::remove_file(PRESELECT_FILE);
+    let name = text.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// The username the dropdown preselects. Precedence: the persisted
 /// last-login marker (if still a real user), then /etc/shedos/login-user,
 /// then the first enumerated user.
