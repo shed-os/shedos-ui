@@ -12,11 +12,17 @@ const POWER_GLYPH: char = '\u{F011}';
 const RESTART_GLYPH: char = '\u{F021}';
 const SLEEP_GLYPH: char = '\u{F186}';
 const HIBERNATE_GLYPH: char = '\u{F236}';
+// Leading affordance glyphs at the inner-left of the input fields:
+// a person on the username field, a padlock on the password field.
+const USER_GLYPH: char = '\u{F007}';
+const LOCK_GLYPH: char = '\u{F023}';
+// Caps-lock indicator at the inner-right of the password box.
+const CAPS_GLYPH: char = '\u{F0632}';
+const FIELD_ICON_GAP: i32 = 16;
 
 const CLOCK_PX: f32 = 120.0;
 const DATE_PX: f32 = 24.0;
 const GREET_PX: f32 = 32.0;
-const BRAND_PX: f32 = 18.0;
 pub(crate) const INPUT_FONT_PX: f32 = 18.0;
 const FP_HINT_PX: f32 = 16.0;
 
@@ -105,32 +111,40 @@ pub fn paint_widgets(
         );
     }
 
-    // Caps-lock tag at the left edge of the input. Rendered before
-    // the password dots so the dot-centering math can reserve room
-    // for it. When caps is off, the dots use the full inner width.
-    let caps_region_w = if state.capslock {
-        let tag = "CAPS";
-        let tag_w = bold.measure_width(tag, BRAND_PX);
-        let tag_x = box_x + INPUT_PAD;
-        let tag_y = box_y + (INPUT_H as i32 * 2 / 3);
-        bold.render(
-            tag, BRAND_PX, tag_x, tag_y, accent_color, 0xcc,
-            canvas, canvas_w, canvas_h,
+    // Leading lock glyph at the inner-left of the input box. Content
+    // starts past the glyph's ink, not its (narrower) advance.
+    let (lxmin, lymin, lwb, lh) = regular.glyph_bbox(LOCK_GLYPH, INPUT_FONT_PX);
+    let lock_baseline = box_y + INPUT_H as i32 / 2 + lymin + (lh as i32) / 2;
+    regular.render(
+        &LOCK_GLYPH.to_string(), INPUT_FONT_PX, box_x + INPUT_PAD, lock_baseline,
+        text_color, 0xaa, canvas, canvas_w, canvas_h,
+    );
+    let content_left = INPUT_PAD + lxmin + lwb as i32 + FIELD_ICON_GAP;
+
+    // Caps-lock indicator at the inner-right of the box, mirroring the
+    // username chevron. Shown only while caps lock is on; reserves a slice
+    // of the right edge so a long password's dots stop short of it.
+    let caps_reserve = if state.capslock {
+        let (cxmin, cymin, cw, ch) = regular.glyph_bbox(CAPS_GLYPH, INPUT_FONT_PX);
+        let caps_x = box_x + INPUT_W as i32 - INPUT_PAD - cw as i32 - cxmin;
+        let caps_baseline = box_y + INPUT_H as i32 / 2 + cymin + (ch as i32) / 2;
+        regular.render(
+            &CAPS_GLYPH.to_string(), INPUT_FONT_PX, caps_x, caps_baseline,
+            accent_color, 0xcc, canvas, canvas_w, canvas_h,
         );
-        INPUT_PAD + tag_w + INPUT_PAD
+        cw as i32 + INPUT_PAD
     } else {
         0
     };
 
-    // Render password as bullet glyphs. Cap the visible count to what
-    // fits inside the input box (minus the CAPS reservation on the
-    // left) so long passwords don't render past the rounded edges;
-    // doubles as a shoulder-surfer guard since the displayed length
-    // stops growing past the cap.
+    // Render password as bullet glyphs. Cap the visible count to what fits
+    // between the lock glyph and the caps indicator so long passwords don't
+    // render past the rounded edges; doubles as a shoulder-surfer guard since
+    // the displayed length stops growing past the cap.
     if state.typed_chars > 0 {
+        let (bxmin, _, _, _) = regular.glyph_bbox('●', INPUT_FONT_PX);
         let bullet_w = regular.measure_width("●", INPUT_FONT_PX);
-        let dots_region_x = box_x + caps_region_w;
-        let dots_region_w = (INPUT_W as i32 - caps_region_w - INPUT_PAD).max(0);
+        let dots_region_w = (INPUT_W as i32 - content_left - caps_reserve - INPUT_PAD).max(0);
         let max_dots = if bullet_w > 0 {
             ((dots_region_w / bullet_w) as usize).max(1)
         } else {
@@ -138,8 +152,10 @@ pub fn paint_widgets(
         };
         let visible = state.typed_chars.min(max_dots);
         let dots: String = "●".repeat(visible);
-        let dots_w = regular.measure_width(&dots, INPUT_FONT_PX);
-        let dots_x = dots_region_x + ((dots_region_w - dots_w) / 2);
+        // Left-aligned at the content origin — the same x as the username
+        // name above. The bullet carries a 1px negative left bearing, so
+        // cancel it to land the dot ink where the name's first letter starts.
+        let dots_x = box_x + content_left - bxmin;
         let dots_y = box_y + (INPUT_H as i32 * 2 / 3);
         regular.render(
             &dots, INPUT_FONT_PX, dots_x, dots_y, text_color, 0xff, canvas, canvas_w, canvas_h,
@@ -224,12 +240,25 @@ fn paint_username_menu(
         accent_color, border_alpha,
     );
 
+    // Leading user glyph at the inner-left; the name follows past the
+    // glyph's ink (its advance is narrower than the icon, so the name
+    // would crowd it otherwise).
+    let (uxmin, uymin, uw, uh) = regular.glyph_bbox(USER_GLYPH, username::LABEL_PX);
+    let user_baseline = fy + username::FIELD_H / 2 + uymin + (uh as i32) / 2;
+    regular.render(
+        &USER_GLYPH.to_string(), username::LABEL_PX, fx + INPUT_PAD, user_baseline,
+        text_color, 0xaa, canvas, canvas_w, canvas_h,
+    );
+    let label_x = fx + INPUT_PAD + uxmin + uw as i32 + FIELD_ICON_GAP;
+
+    // The name is rendered bold so it carries the same visual weight as
+    // the password dots, which are bold; regular looked thin beside them.
     if let Some(label) = state.selected_name() {
         if let Some(ch) = label.chars().next() {
-            let (_xmin, ymin, _w, h) = regular.glyph_bbox(ch, username::LABEL_PX);
+            let (_xmin, ymin, _w, h) = bold.glyph_bbox(ch, username::LABEL_PX);
             let baseline = fy + username::FIELD_H / 2 + ymin + (h as i32) / 2;
-            regular.render(
-                label, username::LABEL_PX, fx + INPUT_PAD, baseline,
+            bold.render(
+                label, username::LABEL_PX, label_x, baseline,
                 text_color, 0xff, canvas, canvas_w, canvas_h,
             );
         }
