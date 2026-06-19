@@ -22,7 +22,6 @@ depends=(
 )
 
 makedepends=(
-    'rust>=1.75'
     'cargo'
     'scdoc'
 )

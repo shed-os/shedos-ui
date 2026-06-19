@@ -30,8 +30,7 @@ depends=(
 )
 conflicts=('hyprlock')
 makedepends=(
-    'rust>=1.75'            # workspace builds against rust 2021 edition
-    'cargo'
+    'cargo'                 # pulls rustc; satisfied by the rust pkg or rustup
     'scdoc'                 # man page render
     'pkgconf'               # cpal probes alsa via pkg-config
     'clang'                 # pam-sys uses bindgen at build time; bindgen
