@@ -5,8 +5,8 @@
 # surface and shedos-prompt-ui for font + primitives.
 
 pkgname=shedos-power
-pkgver=2026.06.16
-pkgrel=5
+pkgver=2026.06.18
+pkgrel=1
 pkgdesc='ShedOS power-menu overlay'
 arch=('x86_64')
 url='https://github.com/Theshedman/shedos'

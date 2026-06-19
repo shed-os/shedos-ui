@@ -6,8 +6,8 @@
 # greetd's IPC socket (PAM runs server-side as root).
 
 pkgname=shedos-greeter
-pkgver=2026.06.16
-pkgrel=6
+pkgver=2026.06.18
+pkgrel=1
 pkgdesc='ShedOS greetd greeter (login screen)'
 arch=('x86_64')
 url='https://github.com/Theshedman/shedos'
