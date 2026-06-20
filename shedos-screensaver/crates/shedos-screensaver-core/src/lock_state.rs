@@ -21,6 +21,9 @@ pub struct LockStateConfig {
     pub prompt_idle_hide: Duration,
     /// Prompt→Screensaver round-trips before the lock screen powers monitors off.
     pub cycles_before_dpms: u32,
+    /// Live ISO: never raise the password prompt — the lock is a pure
+    /// screensaver. Installed boxes leave this false.
+    pub suppress_prompt: bool,
 }
 
 #[derive(Debug)]
@@ -61,8 +64,9 @@ impl LockState {
                 LockPhase::Screensaver => {
                     if self.screensaver_visits >= self.config.cycles_before_dpms {
                         self.enter(LockPhase::Dpms, now);
-                    } else if now.saturating_duration_since(self.phase_entered_at)
-                        >= self.config.prompt_after
+                    } else if !self.config.suppress_prompt
+                        && now.saturating_duration_since(self.phase_entered_at)
+                            >= self.config.prompt_after
                     {
                         self.enter(LockPhase::Prompt, now);
                         self.last_input_at = now;
@@ -89,6 +93,16 @@ impl LockState {
     /// happen for `Screensaver` and `Dpms` (both go to `Prompt`).
     pub fn on_input(&mut self, now: Instant) {
         self.last_input_at = now;
+        if self.config.suppress_prompt {
+            // Live ISO: the lock is a pure screensaver, so input never
+            // raises the password prompt. It only matters to wake the
+            // monitors back from Dpms into the screensaver.
+            if self.phase == LockPhase::Dpms {
+                self.screensaver_visits = 0;
+                self.enter(LockPhase::Screensaver, now);
+            }
+            return;
+        }
         match self.phase {
             LockPhase::Screensaver => self.enter(LockPhase::Prompt, now),
             LockPhase::Prompt => {}
@@ -107,6 +121,10 @@ impl LockState {
             LockPhase::Screensaver => {
                 if self.screensaver_visits >= self.config.cycles_before_dpms {
                     Some(Duration::ZERO)
+                } else if self.config.suppress_prompt {
+                    // No time-driven transition: a pure screensaver never
+                    // advances to the prompt on its own.
+                    None
                 } else {
                     let deadline = self.phase_entered_at + self.config.prompt_after;
                     Some(deadline.saturating_duration_since(now))
@@ -135,6 +153,7 @@ mod tests {
             prompt_after: Duration::from_secs(t2_secs),
             prompt_idle_hide: Duration::from_secs(t3_secs),
             cycles_before_dpms: n,
+            suppress_prompt: false,
         }
     }
 
@@ -485,6 +504,30 @@ mod tests {
         s.on_input(t);
         assert_eq!(s.phase(), LockPhase::Prompt);
         assert_eq!(s.screensaver_visits(), 0);
+    }
+
+    // Live ISO (suppress_prompt): the lock stays a pure screensaver — it
+    // never auto-raises the prompt on idle, never raises it on input, and
+    // never schedules a wake for one.
+    #[test]
+    fn suppress_prompt_stays_in_screensaver_past_t2() {
+        let now = instant();
+        let mut c = cfg(300, 120, 3);
+        c.suppress_prompt = true;
+        let mut s = LockState::new(c, now);
+        s.tick(now + Duration::from_secs(1_000_000));
+        assert_eq!(s.phase(), LockPhase::Screensaver);
+        assert!(s.time_until_next_transition(now).is_none());
+    }
+
+    #[test]
+    fn on_input_with_suppress_prompt_stays_screensaver() {
+        let now = instant();
+        let mut c = cfg(300, 120, 3);
+        c.suppress_prompt = true;
+        let mut s = LockState::new(c, now);
+        s.on_input(now + Duration::from_secs(5));
+        assert_eq!(s.phase(), LockPhase::Screensaver);
     }
 
     #[test]

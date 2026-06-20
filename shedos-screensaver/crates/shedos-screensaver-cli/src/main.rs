@@ -635,10 +635,12 @@ fn build_lock_config(cli: &Cli) -> Result<LockConfig, String> {
         })
     });
 
-    let state_config = build_lock_state_config(cli)?;
-    // Live ISO (/run/archiso present): unlock on any key, and skip the
-    // fingerprint thread (no fingers are enrolled on a live boot anyway).
+    // Live ISO (/run/archiso present): unlock on any key, skip the
+    // fingerprint thread (no fingers are enrolled on a live boot anyway),
+    // and keep the lock a pure screensaver so the password prompt never
+    // appears for a user who never set a password.
     let no_auth = live_boot(std::path::Path::new("/"));
+    let state_config = build_lock_state_config(cli, no_auth)?;
     let fingerprint = if no_auth {
         None
     } else {
@@ -692,7 +694,7 @@ struct LockToml {
     prompt_cycles: Option<u32>,
 }
 
-fn build_lock_state_config(cli: &Cli) -> Result<LockStateConfig, String> {
+fn build_lock_state_config(cli: &Cli, suppress_prompt: bool) -> Result<LockStateConfig, String> {
     const DEFAULT_T2: u64 = 300;
     const DEFAULT_T3: u64 = 120;
     const DEFAULT_N: u32 = 3;
@@ -734,6 +736,7 @@ fn build_lock_state_config(cli: &Cli) -> Result<LockStateConfig, String> {
         prompt_after: Duration::from_secs(prompt_after),
         prompt_idle_hide: Duration::from_secs(prompt_idle_hide),
         cycles_before_dpms: prompt_cycles,
+        suppress_prompt,
     })
 }
 
