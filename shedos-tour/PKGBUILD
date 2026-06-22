@@ -5,7 +5,7 @@
 # a stamp-gated user oneshot. `shedman tour` replays it.
 
 pkgname=shedos-tour
-pkgver=2026.06.18
+pkgver=2026.06.19
 pkgrel=1
 pkgdesc='ShedOS first-run welcome tour overlay'
 arch=('x86_64')
