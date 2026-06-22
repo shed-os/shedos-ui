@@ -132,6 +132,7 @@ pub const SLIDES: &[Slide] = &[
         rows: &[
             Row { caps: &["shedman update"], text: "upgrades take a snapshot first" },
             Row { caps: &["shedman rollback"], text: "undoes any of them, one command" },
+            Row { caps: &["shedman tpm2 enroll"], text: "passwordless unlock on an encrypted box" },
             Row { caps: &[], text: "Three failed boots in a row? The system boots its" },
             Row { caps: &[], text: "last good snapshot by itself and tells you." },
             Row { caps: &[], text: "Configs you edit are never overwritten by updates." },
