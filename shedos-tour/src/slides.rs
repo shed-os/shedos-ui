@@ -381,3 +381,68 @@ pub fn paint(
         hint, HINT_PX, cx - hw / 2, card_y + CARD_H as i32 - 18, p.muted, a8, canvas, w, h,
     );
 }
+
+/// The mandatory recovery-key slide (#202): the disk recovery key in a framed,
+/// accent-coloured box, a write-it-down warning, and the typed acknowledgement the
+/// tour gates on. Same card/fonts/colours as `paint` so it sits in the same overlay.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_recovery(
+    canvas: &mut [u8],
+    w: u32,
+    h: u32,
+    rec: &crate::recovery::Recovery,
+    regular: &FontFace,
+    bold: &FontFace,
+    p: &Palette,
+) {
+    fill_backdrop(canvas, w, h, BACKDROP_ALPHA, p);
+    let a8: u8 = 0xff;
+
+    let card_x = (w as i32 - CARD_W as i32) / 2;
+    let card_y = (h as i32 - CARD_H as i32) / 2;
+    draw_rounded_box(
+        canvas, w, h, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS, 1,
+        p.card_bg, a8, p.card_border, a8,
+    );
+
+    let cx = w as i32 / 2;
+    let mut y = card_y + 72;
+
+    let title = "Save your disk recovery key";
+    let tw = bold.measure_width(title, TITLE_PX);
+    bold.render(title, TITLE_PX, cx - tw / 2, y, p.text, a8, canvas, w, h);
+    y += 42;
+
+    let warn = [
+        "This is the ONLY way back in if you forget your",
+        "passphrase. Write it down and store it somewhere",
+        "safe — it will not be shown again.",
+    ];
+    for line in warn {
+        let lw = regular.measure_width(line, BODY_PX);
+        regular.render(line, BODY_PX, cx - lw / 2, y, p.muted, a8, canvas, w, h);
+        y += 22;
+    }
+    y += 34;
+
+    // The key, framed + accent-coloured so it reads as the thing to copy.
+    let key_px = 18.0;
+    let kw = bold.measure_width(&rec.key, key_px);
+    let box_w = ((kw + 56).max(360) as u32).min(CARD_W - 2 * CARD_PAD_X as u32);
+    draw_rounded_box(
+        canvas, w, h, cx - box_w as i32 / 2, y - 8, box_w, 50, 10, 1,
+        p.cap_bg, a8, p.card_border, a8,
+    );
+    bold.render(&rec.key, key_px, cx - kw / 2, y + 24, p.accent, a8, canvas, w, h);
+    y += 50 + 44;
+
+    // Acknowledgement line: the phrase to type and what the user has entered, with a
+    // block cursor so an empty field still shows where to type.
+    let prompt = format!(
+        "Type '{}' to continue:  {}\u{2588}",
+        crate::recovery::ACK_PHRASE,
+        rec.typed()
+    );
+    let pw = regular.measure_width(&prompt, BODY_PX);
+    regular.render(&prompt, BODY_PX, cx - pw / 2, y, p.text, a8, canvas, w, h);
+}

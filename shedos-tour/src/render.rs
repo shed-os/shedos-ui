@@ -38,9 +38,18 @@ use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::
     Shape as CursorShape, WpCursorShapeDeviceV1,
 };
 
+use crate::recovery;
 use crate::slides::{self, TourState};
 
-pub fn run() -> Result<()> {
+pub fn run(recovery_only: bool) -> Result<()> {
+    // Read the stashed recovery key up front. In --recovery mode (the in-place
+    // re-trigger) there is nothing to show without one, so exit before grabbing
+    // the screen; the normal tour just runs without the extra slide.
+    let key = recovery::read_stash(&recovery::stash_path());
+    if recovery_only && key.is_none() {
+        return Ok(());
+    }
+
     let conn = Connection::connect_to_env().context("connect to Wayland (WAYLAND_DISPLAY)")?;
     let (globals, event_queue) =
         registry_queue_init::<App>(&conn).context("init Wayland registry")?;
@@ -119,6 +128,8 @@ pub fn run() -> Result<()> {
         wordmark,
         live,
         exit: false,
+        recovery: key.map(recovery::Recovery::new),
+        recovery_only,
     };
 
     WaylandSource::new(conn.clone(), event_queue)
@@ -159,6 +170,10 @@ struct App {
     wordmark: Option<shedos_prompt_ui::wordmark::Wordmark>,
     live: LiveTheme,
     exit: bool,
+    /// Present + unacknowledged means the recovery-key slide owns the screen: all
+    /// nav, Esc, and quit are inert until the user types the acknowledgement.
+    recovery: Option<recovery::Recovery>,
+    recovery_only: bool,
 }
 
 impl App {
@@ -200,10 +215,14 @@ impl App {
         };
 
         let palette = slides::Palette::from_theme(self.live.theme());
-        slides::paint(
-            canvas, w, h, &self.state, &self.regular, &self.bold,
-            self.wordmark.as_mut(), &palette,
-        );
+        if let Some(rec) = self.recovery.as_ref() {
+            slides::paint_recovery(canvas, w, h, rec, &self.regular, &self.bold, &palette);
+        } else {
+            slides::paint(
+                canvas, w, h, &self.state, &self.regular, &self.bold,
+                self.wordmark.as_mut(), &palette,
+            );
+        }
 
         let surface = self.layer.wl_surface().clone();
         surface.attach(Some(buffer.wl_buffer()), 0, 0);
@@ -214,6 +233,33 @@ impl App {
     fn advance(&mut self) {
         self.state.next();
         self.draw();
+    }
+
+    // Drive the recovery-key acknowledgement: Backspace edits, any other text feeds
+    // the phrase buffer. Once it matches, shred the stash and either exit (the
+    // --recovery re-trigger) or fall through to the normal tour's first slide.
+    fn handle_recovery_key(&mut self, event: KeyEvent) {
+        {
+            let Some(rec) = self.recovery.as_mut() else { return };
+            if event.keysym == Keysym::BackSpace {
+                rec.backspace();
+            } else if let Some(text) = &event.utf8 {
+                for c in text.chars() {
+                    rec.type_char(c);
+                }
+            }
+        }
+        if self.recovery.as_ref().is_some_and(|r| r.acknowledged()) {
+            recovery::shred_stash(&recovery::stash_path());
+            if self.recovery_only {
+                self.exit = true;
+            } else {
+                self.recovery = None;
+                self.draw();
+            }
+        } else {
+            self.draw();
+        }
     }
 }
 
@@ -351,6 +397,11 @@ impl KeyboardHandler for App {
         _: u32,
         event: KeyEvent,
     ) {
+        // The recovery slide grabs everything until acknowledged — no skip, no quit.
+        if self.recovery.is_some() {
+            self.handle_recovery_key(event);
+            return;
+        }
         match event.keysym {
             Keysym::Escape | Keysym::q => {
                 self.exit = true;
@@ -414,7 +465,8 @@ impl PointerHandler for App {
                         dev.set_shape(serial, CursorShape::Default);
                     }
                 }
-                PointerEventKind::Press { button: 0x110, .. } => {
+                // Clicks advance the tour, but never the gated recovery slide.
+                PointerEventKind::Press { button: 0x110, .. } if self.recovery.is_none() => {
                     self.advance();
                 }
                 _ => {}
