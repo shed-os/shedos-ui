@@ -1,0 +1,20 @@
+[Unit]
+Description=Show the disk recovery key after in-place encryption
+# In-place only: the box was already set up (tour-shown exists) and `shedman encrypt`
+# stashed a recovery key. Fresh installs show it as slide 0 of the first-run tour, whose
+# !tour-shown condition is mutually exclusive with this — exactly one ever fires. No
+# stamp on success: the tour shreds the stash on acknowledgement, which clears the
+# condition; if the user logs out before saving it, it re-shows next login.
+ConditionPathExists=%h/.local/state/shedos/tour-shown
+ConditionPathExists=/var/lib/shedos/encrypt/recovery-key
+After=graphical-session.target waybar.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+# Let the bar and wallpaper land first, like the tour; the overlay grabs the keyboard.
+ExecStartPre=/usr/bin/sleep 2
+ExecStart=/usr/bin/shedos-tour --recovery
+
+[Install]
+WantedBy=graphical-session.target

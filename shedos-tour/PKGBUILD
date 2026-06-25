@@ -56,6 +56,8 @@ package() {
         "$pkgdir/usr/libexec/shedman/tour"
     install -Dm644 tree/usr/lib/systemd/user/shedos-tour.service \
         "$pkgdir/usr/lib/systemd/user/shedos-tour.service"
+    install -Dm644 tree/usr/lib/systemd/user/shedos-recovery-key.service \
+        "$pkgdir/usr/lib/systemd/user/shedos-recovery-key.service"
     install -Dm644 man/build/shedos-tour.1 \
         "$pkgdir/usr/share/man/man1/shedos-tour.1"
 }
