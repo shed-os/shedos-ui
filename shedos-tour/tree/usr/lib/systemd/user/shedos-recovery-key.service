@@ -3,10 +3,12 @@ Description=Show the disk recovery key after in-place encryption
 # In-place only: the box was already set up (tour-shown exists) and `shedman encrypt`
 # stashed a recovery key. Fresh installs show it as slide 0 of the first-run tour, whose
 # !tour-shown condition is mutually exclusive with this — exactly one ever fires. No
-# stamp on success: the tour shreds the stash on acknowledgement, which clears the
-# condition; if the user logs out before saving it, it re-shows next login.
+# stamp on success: the tour empties and removes the stash on acknowledgement, which
+# clears the condition; if the user logs out before saving it, it re-shows next login.
+# Not-empty (not merely present): a shredded stash the tour could not unlink must
+# never re-trigger the slide.
 ConditionPathExists=%h/.local/state/shedos/tour-shown
-ConditionPathExists=/var/lib/shedos/encrypt/recovery-key
+ConditionFileNotEmpty=/var/lib/shedos/encrypt/recovery-key
 After=graphical-session.target waybar.service
 PartOf=graphical-session.target
 
