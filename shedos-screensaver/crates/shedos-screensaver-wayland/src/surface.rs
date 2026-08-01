@@ -241,11 +241,11 @@ impl WaylandRenderer {
         state.authenticate = Some(authenticate);
         state.no_auth = no_auth;
         state.username = Some(username);
-        // The lock field only earns its place when there is someone to
-        // switch to; on a single-user box it would just list you.
+        // Match the greeter: the field shows even on a single-user box so
+        // the lock screen says who it unlocks.
         if show_username {
             let users = shedos_prompt_ui::enumerate();
-            if users.len() > 1 {
+            if !users.is_empty() {
                 let mut menu = UsernameMenuState { users, ..Default::default() };
                 if let Some(name) = state.username.as_deref() {
                     menu.set_current(name);
