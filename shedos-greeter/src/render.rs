@@ -170,9 +170,8 @@ pub fn run() -> Result<()> {
         .insert(event_loop.handle())
         .map_err(|e| anyhow::anyhow!("insert wayland source: {e}"))?;
 
-    // Start the greetd conversation eagerly: with pam_fprintd in
-    // /etc/pam.d/greetd the reader is armed before the first
-    // keystroke, so touch-to-login works straight from boot.
+    // Start the greetd conversation eagerly so the PAM session is
+    // already waiting at the password prompt on the first keystroke.
     if let Some(username) = app.username.clone() {
         let (ev_tx, ev_rx) = std::sync::mpsc::channel();
         let wake_ping = ping.clone();

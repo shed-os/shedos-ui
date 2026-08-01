@@ -4,9 +4,10 @@
 //! faillock, fprintd's hardware wait) never freezes the render loop.
 //! The worker drives one greetd session at a time:
 //!
-//! 1. `CreateSession { username }` eagerly at greeter start — with
-//!    pam_fprintd in /etc/pam.d/greetd this arms the reader
-//!    immediately, so touch-to-login works straight from boot.
+//! 1. `CreateSession { username }` eagerly at greeter start, so the
+//!    session is already waiting at the secret prompt when the user
+//!    types. (The greetd PAM stack is password-only; the fingerprint
+//!    plumbing below stays for any PAM module that emits it.)
 //! 2. PAM info messages naming the reader surface as
 //!    `AuthEvent::Fingerprint`; the UI shows the affordance while the
 //!    window is open.
