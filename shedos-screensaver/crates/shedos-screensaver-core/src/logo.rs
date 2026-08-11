@@ -4,12 +4,10 @@ use std::path::{Path, PathBuf};
 /// Where shedos-branding installs the canonical SHEDOS art.
 pub const DEFAULT_LOGO_PATH: &str = "/etc/shedos-ascii.txt";
 
-/// Compile-time copy of the canonical SHEDOS art. Pulled from the
-/// shedos-branding tree so the screensaver can't drift from
-/// fastfetch's source. `Logo::load_default()` falls back to this
+/// Compile-time copy of the canonical SHEDOS art, vendored from the
+/// shedos-branding tree. `Logo::load_default()` falls back to this
 /// when the runtime path is missing.
-pub const EMBEDDED_SHEDOS_ART: &str =
-    include_str!("../../../../shedos-branding/tree/etc/shedos-ascii.txt");
+pub const EMBEDDED_SHEDOS_ART: &str = include_str!("../assets/shedos-ascii.txt");
 
 /// SHEDOS ASCII art parsed into a row-major grid plus a derived
 /// binary mask (true = lit, false = blank). Loaded once from
@@ -116,6 +114,11 @@ impl std::error::Error for LogoLoadError {
 mod tests {
     use super::*;
 
+    const BRANDING_ASCII: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../shedos-branding/tree/etc/shedos-ascii.txt"
+    );
+
     fn shedos_art() -> &'static str {
         // Mirror of packaging/shedos-branding/tree/etc/shedos-ascii.txt.
         // Hard-coded here so the test passes even when /etc/shedos-ascii.txt
@@ -178,6 +181,16 @@ mod tests {
         assert_eq!(l.rows, 5, "embedded logo should be 5 rows; got {}", l.rows);
         assert!(l.cols >= 45, "embedded logo should be ≥45 cols; got {}", l.cols);
         assert!(l.lit_count() > 100, "embedded logo should have >100 lit cells; got {}", l.lit_count());
+    }
+
+    #[test]
+    fn vendored_art_matches_branding() {
+        let branding = fs::read_to_string(BRANDING_ASCII)
+            .unwrap_or_else(|e| panic!("cannot read {BRANDING_ASCII}: {e}"));
+        assert_eq!(
+            EMBEDDED_SHEDOS_ART, branding,
+            "assets/shedos-ascii.txt has drifted from {BRANDING_ASCII}"
+        );
     }
 
     #[test]
