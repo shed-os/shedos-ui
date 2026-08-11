@@ -1,0 +1,22 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+# The build pushes the pkgrel bump back here when a release is already
+# published, and a reusable workflow cannot grant itself the write.
+permissions:
+  contents: write
+jobs:
+  pipeline:
+    uses: shed-os/shedos-ci/.github/workflows/package-pipeline.yml@main
+    with:
+      packages: '["shedos-greeter","shedos-power","shedos-screensaver","shedos-switcher","shedos-tour"]'
+      # Every build clones this repository at its tag and then lets cargo
+      # fetch the crates the lock names.
+      needs_network_build: true
+      # The suites compile the whole workspace, so the test job has to install
+      # what the five packages' makedepends and link-time deps would have.
+      test_packages: rust clang curl alsa-lib pam wayland libxkbcommon
+    secrets:
+      SHEDOS_DISPATCH_TOKEN: ${{ secrets.SHEDOS_DISPATCH_TOKEN }}

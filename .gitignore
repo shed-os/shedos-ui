@@ -1,7 +1,17 @@
 target/
+dist/
 */pkg/
 */*.pkg.tar.zst
 */*.pkg.tar.zst.sig
+*/*.tar.gz
 
-# No src/ rule: five of these keep their Rust at <pkg>/src/, which is also
-# where makepkg extracts, and ignoring it untracks the crate.
+# No blanket src/ rule: five of these keep their Rust at <pkg>/src/, which is
+# also where makepkg extracts, and ignoring it untracks the crate. The
+# screensaver keeps its code under crates/, so its src/ is the extract dir and
+# nothing else.
+shedos-screensaver/src/
+
+# Where makepkg leaves the source it fetched: a clone beside the PKGBUILD and
+# a working copy under src/.
+*/shedos-ui/
+*/src/shedos-ui/
