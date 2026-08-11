@@ -29,9 +29,9 @@ makedepends=(
     'scdoc'                   # man page render
 )
 
-# SKIP because a git source has no tarball to checksum; $pkgver names the tag
-# that pins what gets built.
 source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
+# SKIP is fine here: the integrity anchor is the tag $pkgver names, not a
+# tarball checksum.
 sha256sums=('SKIP')
 
 prepare() {

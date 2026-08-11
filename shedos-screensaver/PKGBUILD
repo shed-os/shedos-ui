@@ -40,8 +40,6 @@ backup=(
     'etc/shedos/screensaver.toml'
 )
 
-# SKIP because a git source has no tarball to checksum; $pkgver names the tag
-# that pins what gets built.
 source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
 sha256sums=('SKIP')
 
