@@ -17,6 +17,8 @@ jobs:
       needs_network_build: true
       # The suites compile the whole workspace, so the test job has to install
       # what the five packages' makedepends and link-time deps would have.
-      test_packages: rust clang curl alsa-lib pam wayland libxkbcommon
+      # shedos-branding carries the ASCII art the screensaver's vendored copy
+      # is checked against.
+      test_packages: rust clang alsa-lib pam wayland libxkbcommon shedos-branding
     secrets:
       SHEDOS_DISPATCH_TOKEN: ${{ secrets.SHEDOS_DISPATCH_TOKEN }}

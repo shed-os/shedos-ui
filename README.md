@@ -54,10 +54,10 @@ which builds all five packages, runs every `test/*/run.sh`, and asks
 screensaver binary's read-only modes).
 
 One of the unit tests compares the screensaver's vendored ASCII art against
-the copy `shedos-branding` installs at `/etc/shedos-ascii.txt`. On a machine
-without that package — the pipeline's container, for one — `test/cargo/run.sh`
-fetches the file from the branding repository first, because a comparison that
-quietly does not happen is how the two drift apart.
+the copy `shedos-branding` installs at `/etc/shedos-ascii.txt`, which is why
+the caller names that package in `test_packages`. The test fails rather than
+bowing out when the file is missing, because a comparison that quietly does
+not happen is how the two drift apart.
 
 These packages are also still built out of the ShedOS monolith. Until that
 stops, a change made here has to be made there too.
