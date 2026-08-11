@@ -1,14 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/shedos-screensaver-core",
-    "crates/shedos-screensaver-i18n",
-    "crates/shedos-screensaver-logos",
-    "crates/shedos-screensaver-effects",
-    "crates/shedos-screensaver-tty",
-    "crates/shedos-screensaver-wayland",
-    "crates/shedos-screensaver-audio",
-    "crates/shedos-screensaver-cli",
+    "shedos-prompt-ui",
+    "shedos-greeter",
+    "shedos-power",
+    "shedos-switcher",
+    "shedos-tour",
+    "shedos-screensaver/crates/shedos-screensaver-core",
+    "shedos-screensaver/crates/shedos-screensaver-i18n",
+    "shedos-screensaver/crates/shedos-screensaver-logos",
+    "shedos-screensaver/crates/shedos-screensaver-effects",
+    "shedos-screensaver/crates/shedos-screensaver-tty",
+    "shedos-screensaver/crates/shedos-screensaver-wayland",
+    "shedos-screensaver/crates/shedos-screensaver-audio",
+    "shedos-screensaver/crates/shedos-screensaver-cli",
 ]
 
 [workspace.package]
@@ -49,14 +54,14 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
-shedos-prompt-ui = { path = "../shedos-prompt-ui" }
-shedos-screensaver-core = { path = "crates/shedos-screensaver-core" }
-shedos-screensaver-i18n = { path = "crates/shedos-screensaver-i18n" }
-shedos-screensaver-logos = { path = "crates/shedos-screensaver-logos" }
-shedos-screensaver-effects = { path = "crates/shedos-screensaver-effects" }
-shedos-screensaver-tty = { path = "crates/shedos-screensaver-tty" }
-shedos-screensaver-wayland = { path = "crates/shedos-screensaver-wayland" }
-shedos-screensaver-audio = { path = "crates/shedos-screensaver-audio" }
+shedos-prompt-ui = { path = "shedos-prompt-ui" }
+shedos-screensaver-core = { path = "shedos-screensaver/crates/shedos-screensaver-core" }
+shedos-screensaver-i18n = { path = "shedos-screensaver/crates/shedos-screensaver-i18n" }
+shedos-screensaver-logos = { path = "shedos-screensaver/crates/shedos-screensaver-logos" }
+shedos-screensaver-effects = { path = "shedos-screensaver/crates/shedos-screensaver-effects" }
+shedos-screensaver-tty = { path = "shedos-screensaver/crates/shedos-screensaver-tty" }
+shedos-screensaver-wayland = { path = "shedos-screensaver/crates/shedos-screensaver-wayland" }
+shedos-screensaver-audio = { path = "shedos-screensaver/crates/shedos-screensaver-audio" }
 
 [profile.release]
 lto = "thin"

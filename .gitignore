@@ -1,0 +1,7 @@
+target/
+*/pkg/
+*/*.pkg.tar.zst
+*/*.pkg.tar.zst.sig
+
+# No src/ rule: five of these keep their Rust at <pkg>/src/, which is also
+# where makepkg extracts, and ignoring it untracks the crate.

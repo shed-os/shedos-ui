@@ -19,8 +19,3 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
-
-[profile.release]
-strip = "symbols"
-lto = "thin"
-codegen-units = 1

@@ -114,10 +114,7 @@ impl std::error::Error for LogoLoadError {
 mod tests {
     use super::*;
 
-    const BRANDING_ASCII: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../shedos-branding/tree/etc/shedos-ascii.txt"
-    );
+    const BRANDING_ASCII: &str = DEFAULT_LOGO_PATH;
 
     fn shedos_art() -> &'static str {
         // Mirror of packaging/shedos-branding/tree/etc/shedos-ascii.txt.
