@@ -62,7 +62,6 @@ shedos-screensaver-audio = { path = "crates/shedos-screensaver-audio" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
 
 [profile.dev]
 debug = "limited"
