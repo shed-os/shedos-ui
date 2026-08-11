@@ -5,7 +5,7 @@
 # shedos-greeter/power/tour.
 
 pkgname=shedos-switcher
-pkgver=2026.06.18
+pkgver=2026.08.09
 pkgrel=1
 pkgdesc='ShedOS Alt-Tab window switcher overlay'
 arch=('x86_64')
