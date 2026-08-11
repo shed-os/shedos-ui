@@ -24,12 +24,18 @@ depends=(
 makedepends=(
     'cargo'
     'scdoc'
+    'git'
 )
 
 install=shedos-tour.install
 
+# SKIP because a git source has no tarball to checksum; $pkgver names the tag
+# that pins what gets built.
+source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
+sha256sums=('SKIP')
+
 prepare() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-tour"
     install -d man/build
     for src in man/*.scd; do
         out=man/build/$(basename "${src%.scd}")
@@ -38,19 +44,19 @@ prepare() {
 }
 
 build() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-tour"
     cargo build --release --locked
 }
 
 check() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-tour"
     cargo test --release --locked
 }
 
 package() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-tour"
 
-    install -Dm755 target/release/shedos-tour \
+    install -Dm755 "$srcdir/shedos-ui/target/release/shedos-tour" \
         "$pkgdir/usr/bin/shedos-tour"
     install -Dm755 tree/usr/libexec/shedman/tour \
         "$pkgdir/usr/libexec/shedman/tour"

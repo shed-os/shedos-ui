@@ -33,6 +33,7 @@ makedepends=(
     'cargo'                 # pulls rustc; satisfied by the rust pkg or rustup
     'scdoc'                 # man page render
     'pkgconf'               # cpal probes alsa via pkg-config
+    'git'                   # fetches the source tag
     'clang'                 # pam-sys uses bindgen at build time; bindgen
                             # needs libclang.so to parse <security/pam_appl.h>
 )
@@ -40,9 +41,14 @@ backup=(
     'etc/shedos/screensaver.toml'
 )
 
+# SKIP because a git source has no tarball to checksum; $pkgver names the tag
+# that pins what gets built.
+source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
+sha256sums=('SKIP')
+
 prepare() {
     # Render man pages.
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-screensaver"
     install -d man/build
     for src in man/*.scd; do
         out=man/build/$(basename "${src%.scd}")
@@ -51,27 +57,26 @@ prepare() {
 }
 
 build() {
-    cd "$startdir"
-    # `--frozen` enforces the vendored Cargo.lock; drop it for the
-    # first time the lockfile is generated, then re-add. CI uses
-    # --frozen to catch unexpected dep updates.
+    cd "$srcdir/shedos-ui/shedos-screensaver"
+    # The pattern selects this package's eight crates out of the shared
+    # workspace; a bare --workspace would drag in the other UI members.
     #
     # SHEDOS_VERSION is read by crates/shedos-screensaver-cli/build.rs
     # so the binary's `--version` reports the package's CalVer
     # (pkgver-pkgrel) rather than the internal SemVer in Cargo.toml.
     SHEDOS_VERSION="${pkgver}-${pkgrel}" \
-        cargo build --release --locked --workspace
+        cargo build --release --locked -p 'shedos-screensaver-*'
 }
 
 check() {
-    cd "$startdir"
-    cargo test --release --locked --workspace
+    cd "$srcdir/shedos-ui/shedos-screensaver"
+    cargo test --release --locked -p 'shedos-screensaver-*'
 }
 
 package() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-screensaver"
 
-    install -Dm755 target/release/shedos-screensaver \
+    install -Dm755 "$srcdir/shedos-ui/target/release/shedos-screensaver" \
         "$pkgdir/usr/bin/shedos-screensaver"
 
     install -Dm755 tree/usr/libexec/shedman/screensaver \
@@ -120,10 +125,10 @@ package() {
     install -d "$pkgdir/usr/share/bash-completion/completions"
     install -d "$pkgdir/usr/share/zsh/site-functions"
     install -d "$pkgdir/usr/share/fish/vendor_completions.d"
-    target/release/shedos-screensaver --complete-bash \
+    "$srcdir/shedos-ui/target/release/shedos-screensaver" --complete-bash \
         > "$pkgdir/usr/share/bash-completion/completions/shedos-screensaver"
-    target/release/shedos-screensaver --complete-zsh \
+    "$srcdir/shedos-ui/target/release/shedos-screensaver" --complete-zsh \
         > "$pkgdir/usr/share/zsh/site-functions/_shedos-screensaver"
-    target/release/shedos-screensaver --complete-fish \
+    "$srcdir/shedos-ui/target/release/shedos-screensaver" --complete-fish \
         > "$pkgdir/usr/share/fish/vendor_completions.d/shedos-screensaver.fish"
 }

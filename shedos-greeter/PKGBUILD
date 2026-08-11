@@ -27,10 +27,16 @@ depends=(
 makedepends=(
     'cargo'                   # pulls rustc; satisfied by the rust pkg or rustup
     'scdoc'                   # man page render
+    'git'                     # fetches the source tag
 )
 
+# SKIP because a git source has no tarball to checksum; $pkgver names the tag
+# that pins what gets built.
+source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
+sha256sums=('SKIP')
+
 prepare() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-greeter"
     install -d man/build
     for src in man/*.scd; do
         out=man/build/$(basename "${src%.scd}")
@@ -39,21 +45,21 @@ prepare() {
 }
 
 build() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-greeter"
     # `--locked` enforces the vendored Cargo.lock so CI can't silently
     # pick up a transitive update; `--frozen` is implicit when locked.
     cargo build --release --locked
 }
 
 check() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-greeter"
     cargo test --release --locked
 }
 
 package() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-greeter"
 
-    install -Dm755 target/release/shedos-greeter \
+    install -Dm755 "$srcdir/shedos-ui/target/release/shedos-greeter" \
         "$pkgdir/usr/bin/shedos-greeter"
 
     install -Dm644 man/build/shedos-greeter.1 \

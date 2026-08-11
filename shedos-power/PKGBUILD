@@ -24,10 +24,16 @@ depends=(
 makedepends=(
     'cargo'
     'scdoc'
+    'git'
 )
 
+# SKIP because a git source has no tarball to checksum; $pkgver names the tag
+# that pins what gets built.
+source=("git+https://github.com/shed-os/shedos-ui.git#tag=$pkgver")
+sha256sums=('SKIP')
+
 prepare() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-power"
     install -d man/build
     for src in man/*.scd; do
         out=man/build/$(basename "${src%.scd}")
@@ -36,19 +42,19 @@ prepare() {
 }
 
 build() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-power"
     cargo build --release --locked
 }
 
 check() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-power"
     cargo test --release --locked
 }
 
 package() {
-    cd "$startdir"
+    cd "$srcdir/shedos-ui/shedos-power"
 
-    install -Dm755 target/release/shedos-power \
+    install -Dm755 "$srcdir/shedos-ui/target/release/shedos-power" \
         "$pkgdir/usr/bin/shedos-power"
 
     install -Dm644 man/build/shedos-power.1 \
