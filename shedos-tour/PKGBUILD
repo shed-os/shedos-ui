@@ -24,7 +24,6 @@ depends=(
 makedepends=(
     'cargo'
     'scdoc'
-    'git'
 )
 
 install=shedos-tour.install

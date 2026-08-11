@@ -24,7 +24,6 @@ depends=(
 makedepends=(
     'cargo'
     'scdoc'
-    'git'
 )
 
 # SKIP because a git source has no tarball to checksum; $pkgver names the tag

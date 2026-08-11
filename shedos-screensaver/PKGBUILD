@@ -33,7 +33,6 @@ makedepends=(
     'cargo'                 # pulls rustc; satisfied by the rust pkg or rustup
     'scdoc'                 # man page render
     'pkgconf'               # cpal probes alsa via pkg-config
-    'git'                   # fetches the source tag
     'clang'                 # pam-sys uses bindgen at build time; bindgen
                             # needs libclang.so to parse <security/pam_appl.h>
 )
