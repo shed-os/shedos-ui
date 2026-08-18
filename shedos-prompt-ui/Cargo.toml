@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Shared prompt-surface rendering for ShedOS lock surfaces (greeter, screensaver lock)"
-repository = "https://github.com/Theshedman/shedos"
+repository.workspace = true
 publish = false
 
 [lib]
