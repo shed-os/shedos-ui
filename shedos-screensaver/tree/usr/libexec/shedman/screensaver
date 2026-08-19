@@ -1,10 +1,59 @@
 #!/bin/bash
-# Thin shim; `shedman` autodiscovers /usr/libexec/shedman/* as
-# subcommands; the actual binary lives at /usr/bin/shedos-screensaver
-# so users can also invoke it directly (e.g. via systemd-run from
-# hypridle, or from i3/sway sessions where shedman isn't installed).
+# shedman screensaver; the animated screensaver and the lock screen.
 #
-# `exec` so the parent shedman dispatcher's argv-preserve flow works
-# correctly (signals, exit code, no extra fork).
+# The work is /usr/bin/shedos-screensaver, which users can also invoke
+# directly (systemd-run from hypridle, or an i3/sway session where
+# shedman is not installed). `exec` so the dispatcher's argv-preserve
+# flow works — signals, exit code, no extra fork.
+#
+# The completion contract is answered here rather than passed through.
+# The dispatcher's completers read a word list off stdout, and what the
+# binary emits for the same flag names is a whole shell completion
+# SCRIPT for `shedos-screensaver` — the file the package installs into
+# /usr/share/bash-completion. Two different questions wearing one flag
+# name. test/screensaver holds the list below against the binary's own,
+# so a flag added there and not here is a red rather than a silence.
+
+case "${1:-}" in
+    --complete-bash|--complete-zsh)
+        printf '%s\n' \
+            --list --list-logos --help-effect --effect --logo --color \
+            --mode --fps --duration --hold --idle-daemon --audio-source \
+            --wallpaper --wallpaper-dim --locale --font-path \
+            --cell-height-px --cycle --survey --prompt-after-secs \
+            --prompt-idle-hide-secs --prompt-cycles \
+            --help -h --version -V
+        exit 0
+        ;;
+    --complete-fish)
+        cat <<'EOF'
+--list	List the forming effects
+--list-logos	List the logo variants
+--help-effect	Describe one effect by name
+--effect	Lock to one effect instead of picking at random
+--logo	Lock to one logo variant instead of picking at random
+--color	Override the target colour for the session
+--mode	Render backend: tty, wayland, lock or auto
+--fps	Frames per second
+--duration	Auto-exit after this many seconds
+--hold	Hold the resolved art this long between effects
+--idle-daemon	Ignore keypresses and exit only on SIGUSR1
+--audio-source	Audio reactivity source: desktop, mic or none
+--wallpaper	Wayland background image, or none or auto
+--wallpaper-dim	Wayland wallpaper dim multiplier
+--locale	Locale override (BCP-47)
+--font-path	Wayland font path
+--cell-height-px	Wayland cell pixel height
+--cycle	Repeatable: one effect to cycle through
+--survey	Walk every logo and effect pair and print the frames
+--prompt-after-secs	Lock mode: dwell before the prompt appears
+--prompt-idle-hide-secs	Lock mode: idle dwell before the prompt hides
+--prompt-cycles	Lock mode: round-trips before DPMS off
+--help	Show the full help
+--version	Show the version
+EOF
+        exit 0
+        ;;
+esac
 
 exec /usr/bin/shedos-screensaver "$@"

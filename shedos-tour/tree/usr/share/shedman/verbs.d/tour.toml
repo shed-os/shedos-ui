@@ -1,0 +1,5 @@
+name = "tour"
+package = "shedos-tour"
+man = "shedman-tour.1"
+description = "replay the first-run welcome tour overlay"
+completes = false

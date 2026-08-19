@@ -1,12 +1,13 @@
-shedos-tour(1)
+shedman-tour(1)
 
 # NAME
 
-shedos-tour - first-run welcome tour overlay
+shedman-tour - first-run welcome tour overlay
 
 # SYNOPSIS
 
-*shedman tour*
+*shedman tour*++
+*shedos-tour*
 
 # DESCRIPTION
 
@@ -17,6 +18,8 @@ keys or clicks navigate; *Esc* skips; *Enter* on the last slide
 opens the keybinding reference. Shown once per user
 (*~/.local/state/shedos/tour-shown*); *shedman tour* replays it.
 
+It takes no options of its own.
+
 # SEE ALSO
 
-*shedman-keybindings*(1)
+*shedman*(1), *shedman-keybindings*(1)

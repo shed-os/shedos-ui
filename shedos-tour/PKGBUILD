@@ -18,6 +18,7 @@ depends=(
     'wayland'
     'libxkbcommon'
     'ttf-jetbrains-mono-nerd'
+    'shedman'
     'shedos-system'
 )
 
@@ -57,10 +58,13 @@ package() {
         "$pkgdir/usr/bin/shedos-tour"
     install -Dm755 tree/usr/libexec/shedman/tour \
         "$pkgdir/usr/libexec/shedman/tour"
+    # The declaration the dispatcher lists the verb from.
+    install -Dm644 tree/usr/share/shedman/verbs.d/tour.toml \
+        "$pkgdir/usr/share/shedman/verbs.d/tour.toml"
     install -Dm644 tree/usr/lib/systemd/user/shedos-tour.service \
         "$pkgdir/usr/lib/systemd/user/shedos-tour.service"
     install -Dm644 tree/usr/lib/systemd/user/shedos-recovery-key.service \
         "$pkgdir/usr/lib/systemd/user/shedos-recovery-key.service"
-    install -Dm644 man/build/shedos-tour.1 \
-        "$pkgdir/usr/share/man/man1/shedos-tour.1"
+    install -Dm644 man/build/shedman-tour.1 \
+        "$pkgdir/usr/share/man/man1/shedman-tour.1"
 }

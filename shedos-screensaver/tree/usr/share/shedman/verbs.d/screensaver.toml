@@ -1,0 +1,4 @@
+name = "screensaver"
+package = "shedos-screensaver"
+man = "shedman-screensaver.1"
+description = "animated screensaver and lock screen (TTY and Wayland)"

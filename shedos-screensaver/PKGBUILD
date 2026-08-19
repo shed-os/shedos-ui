@@ -20,6 +20,7 @@ install=shedos-screensaver.install
 depends=(
     'gcc-libs'              # rust runtime
     'glibc'
+    'shedman'               # the dispatcher this ships a verb and a declaration for
     'shedos-branding'       # /etc/shedos-ascii.txt
     'wayland'               # libwayland-client.so.0 (Wayland renderer)
     'libxkbcommon'          # crossterm + smithay keyboard handling
@@ -78,6 +79,10 @@ package() {
 
     install -Dm755 tree/usr/libexec/shedman/screensaver \
         "$pkgdir/usr/libexec/shedman/screensaver"
+
+    # The declaration the dispatcher lists the verb from.
+    install -Dm644 tree/usr/share/shedman/verbs.d/screensaver.toml \
+        "$pkgdir/usr/share/shedman/verbs.d/screensaver.toml"
 
     install -Dm644 tree/etc/shedos/screensaver.toml \
         "$pkgdir/etc/shedos/screensaver.toml"

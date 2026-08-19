@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Read-only-mode tests for shedos-screensaver: hermetic, no live terminal
-# mucking beyond T11's pty smoke via script(1).
+# mucking beyond T13's pty smoke via script(1).
 
 set -uo pipefail
 
@@ -128,15 +128,43 @@ out=$("$BIN" --color rubbish 2>&1); code=$?
 expect_exit "T11 --color rubbish exits 2" 2 "$code" "$out"
 expect_contains "T11 stderr names the bad color" "rubbish" "$out"
 
-# T12: pty smoke for one effect cycle
-if command -v script >/dev/null 2>&1; then
-    if script -q -c "$BIN --mode=tty --effect rain --logo block --duration 0.5 --hold 0" /dev/null > /dev/null 2>&1; then
-        ok "T12 pty rain on block --duration 0.5 exits cleanly"
+# T12: the verb shim's flag vocabulary against the binary's own
+#
+# `shedman screensaver` reaches the binary through a shim, and the shim
+# answers the completion contract itself because the dispatcher's completers
+# want a word list where the binary emits a completion script. That leaves two
+# lists, and this is what keeps them one: every long option clap knows is one
+# the shim offers, and every one the shim offers is one clap knows.
+SHIM=$REPO_ROOT/shedos-screensaver/tree/usr/libexec/shedman/screensaver
+if [[ -x $SHIM ]]; then
+    clap_opts=$("$BIN" --complete-bash 2>/dev/null \
+        | sed -n 's/^ *opts="\(.*\)"$/\1/p' | tr ' ' '\n' \
+        | grep '^--' | grep -vE '^--(help-summary|complete-(bash|zsh|fish))$' \
+        | LC_ALL=C sort -u)
+    shim_opts=$("$SHIM" --complete-bash 2>/dev/null \
+        | grep '^--' | LC_ALL=C sort -u)
+    if [[ -z $clap_opts ]]; then
+        fail "T12 the binary's completion script names its options"
+    elif drift=$(LC_ALL=C comm -3 <(printf '%s\n' "$clap_opts") \
+            <(printf '%s\n' "$shim_opts")) && [[ -z $drift ]]; then
+        ok "T12 the shim offers exactly the options the binary takes"
     else
-        fail "T12 pty cycle returned non-zero"
+        fail "T12 the shim and the binary disagree about the options" \
+            "$(tr '\n' ' ' <<<"$drift")"
     fi
 else
-    echo "  (skipping T12: script(1) not installed)"
+    fail "T12 the verb shim is executable" "$SHIM"
+fi
+
+# T13: pty smoke for one effect cycle
+if command -v script >/dev/null 2>&1; then
+    if script -q -c "$BIN --mode=tty --effect rain --logo block --duration 0.5 --hold 0" /dev/null > /dev/null 2>&1; then
+        ok "T13 pty rain on block --duration 0.5 exits cleanly"
+    else
+        fail "T13 pty cycle returned non-zero"
+    fi
+else
+    echo "  (skipping T13: script(1) not installed)"
 fi
 
 echo
