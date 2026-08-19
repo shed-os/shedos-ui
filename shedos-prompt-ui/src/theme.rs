@@ -79,9 +79,9 @@ impl Theme {
             font_mono: "JetBrainsMono Nerd Font".to_string(),
             base: 0xFF1E1E2E,
             text: 0xFFCDD6F4,
-            accent: 0xFF89B4FA,
+            accent: 0xFFA6E3A1,
             red: 0xFFF38BA8,
-            accent_secondary: 0xFFCBA6F7,
+            accent_secondary: 0xFF94E2D5,
             yellow: 0xFFF9E2AF,
             mantle: 0xFF181825,
             surface0: 0xFF313244,
@@ -256,6 +256,18 @@ mod tests {
         assert_eq!(parse_hex("1e1e2e"), None); // missing #
         assert_eq!(parse_hex("#1e1e2"), None); // too short
         assert_eq!(parse_hex("#1e1e2eg"), None); // non-hex
+    }
+
+    // shedos_palette.py's MOCHA is the canonical fallback and says it matches
+    // this one, so the TUIs and the GUIs paint the same colours when the theme
+    // directory is missing. The accent pair drifted apart anyway; these are the
+    // engine's values, and test/release-checks holds the two files together
+    // across the repositories neither of them can see.
+    #[test]
+    fn fallback_accents_are_the_engines() {
+        let fb = Theme::fallback();
+        assert_eq!(fb.accent, 0xFFA6E3A1); // Mocha green
+        assert_eq!(fb.accent_secondary, 0xFF94E2D5); // Mocha teal
     }
 
     #[test]
